@@ -1,27 +1,14 @@
 import sys
 import pyttsx3
 import random
-import threading
-
 
 from PyQt6.QtWidgets import QApplication, QLabel
 from PyQt6.QtGui import QPixmap, QGuiApplication
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QLabel, QMessageBox
 from PyQt6.QtCore import QTimer
-from flask import Flask, request
-from PyQt6.QtCore import QTimer
-from PyQt6.QtCore import Qt, QObject, pyqtSignal
-
 
 app = QApplication(sys.argv)
-
-app_server = Flask(__name__)
-
-class NotificationBridge(QObject):
-    notify_signal = pyqtSignal(str)
-
-
-bridge = NotificationBridge()
 
 responses = [
     "Hello Pup.",
@@ -43,7 +30,7 @@ startup_responses = [
 notifications = [
     "Danny sent you a Discord message.",
     "New email received.",
-    "Rivet reports all services healthy.",
+    "OCR processing completed.",
     "Ratchet reports all services healthy.",
     "Container restarted successfully.",
 ]
@@ -57,24 +44,6 @@ def notify(message):
         "Notification",
         message
     )
-
-
-bridge.notify_signal.connect(notify)
-    
-@app_server.route("/notify", methods=["POST"])
-def receive_notification():
-    data = request.json
-
-    message = data.get(
-        "message",
-        "Notification received"
-    )
-
-    print(f"RECEIVED: {message}")
-
-    bridge.notify_signal.emit(message)
-
-    return {"status": "ok"}
     
 class Companion(QLabel):
     def mousePressEvent(self, event):
@@ -131,15 +100,5 @@ QTimer.singleShot(
     10000,
     lambda: notify(random.choice(notifications))
 )
-
-threading.Thread(
-    target=lambda: app_server.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=False,
-        use_reloader=False
-    ),
-    daemon=True
-).start()
 
 sys.exit(app.exec())
