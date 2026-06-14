@@ -2,13 +2,17 @@ import sys
 import pyttsx3
 import random
 import threading
-import json
 from pathlib import Path
+import json
+
+
 
 from PyQt6.QtGui import QPixmap, QGuiApplication
 from PyQt6.QtWidgets import QApplication, QLabel
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import QTimer
 from flask import Flask, request
+from PyQt6.QtCore import Qt, QObject, pyqtSignal
+
 
 app = QApplication(sys.argv)
 
@@ -18,8 +22,7 @@ CONFIG_PATH = Path(__file__).parent / "config.json"
 
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
-
-
+    
 class NotificationBridge(QObject):
     notify_signal = pyqtSignal(str)
 
@@ -58,7 +61,7 @@ def notify(message):
     notification_label.setText(message)
     notification_label.adjustSize()
 
-    bubble_x = x + 60
+    bubble_x = x + 40
     bubble_y = y - notification_label.height() - 10
 
     notification_label.move(
@@ -69,14 +72,14 @@ def notify(message):
     notification_label.show()
 
     QTimer.singleShot(
-        config["notification_duration"],
-        notification_label.hide
-    )
+    config["notification_duration"],
+    notification_label.hide
+)
+    
 
 
 bridge.notify_signal.connect(notify)
-
-
+    
 @app_server.route("/notify", methods=["POST"])
 def receive_notification():
     data = request.json
@@ -91,8 +94,7 @@ def receive_notification():
     bridge.notify_signal.emit(message)
 
     return {"status": "ok"}
-
-
+    
 class Companion(QLabel):
     def mousePressEvent(self, event):
         phrase = random.choice(responses)
@@ -100,7 +102,6 @@ class Companion(QLabel):
         print(phrase)
 
         notify(phrase)
-
 
 label = Companion()
 
@@ -113,25 +114,20 @@ notification_label.setStyleSheet("""
     padding: 10px;
 """)
 
-notification_label.setWordWrap(True)
-notification_label.setMaximumWidth(250)
-
 notification_label.setWindowFlags(
     Qt.WindowType.FramelessWindowHint
     | Qt.WindowType.WindowStaysOnTopHint
     | Qt.WindowType.Tool
 )
 
-notification_label.setAttribute(
-    Qt.WidgetAttribute.WA_ShowWithoutActivating
-)
+notification_label.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
 
 notification_label.hide()
+
 
 IMAGE_PATH = Path(__file__).parent / config["avatar"]
 
 pixmap = QPixmap(str(IMAGE_PATH))
-
 pixmap = pixmap.scaled(
     config["avatar_size"],
     config["avatar_size"],
@@ -155,17 +151,13 @@ label.setWindowFlags(
     | Qt.WindowType.Tool
 )
 
-label.setAttribute(
-    Qt.WidgetAttribute.WA_TranslucentBackground
-)
+label.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
 label.show()
 
 engine = pyttsx3.init()
 
 startup_phrase = random.choice(startup_responses)
-
-notify(startup_phrase)
 
 print(startup_phrase)
 
