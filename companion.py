@@ -1,5 +1,6 @@
 import sys
-import pyttsx3
+import requests
+import winsound
 import random
 import threading
 import json
@@ -32,6 +33,7 @@ responses = [
     "Ratchet seems quiet today.",
     "Rivet seems to be fine.",
     "How is Danny doing?",
+    "Danny sent you a Discord message and Ratchet is generating speech through Kokoro.",
     "No emergencies detected.",
     "All systems nominal.",
 ]
@@ -51,7 +53,25 @@ notifications = [
     "Container restarted successfully.",
 ]
 
+def speak(message):
+    try:
+        response = requests.post(
+            "http://192.168.1.4:5001/speak",
+            json={"text": message},
+            timeout=30
+        )
 
+        with open("speech.wav", "wb") as f:
+            f.write(response.content)
+
+        winsound.PlaySound(
+            "speech.wav",
+            winsound.SND_FILENAME
+        )
+
+    except Exception as e:
+        print(f"Speech error: {e}")
+        
 def notify(message):
     print(f"NOTIFICATION: {message}")
 
@@ -67,6 +87,12 @@ def notify(message):
     )
 
     notification_label.show()
+
+    threading.Thread(
+        target=speak,
+        args=(message,),
+        daemon=True
+    ).start()
 
     QTimer.singleShot(
         config["notification_duration"],
@@ -161,16 +187,11 @@ label.setAttribute(
 
 label.show()
 
-engine = pyttsx3.init()
-
 startup_phrase = random.choice(startup_responses)
 
 notify(startup_phrase)
 
 print(startup_phrase)
-
-engine.say(startup_phrase)
-engine.runAndWait()
 
 QTimer.singleShot(
     10000,
