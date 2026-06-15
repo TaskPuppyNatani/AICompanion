@@ -10,6 +10,17 @@ app = Flask(__name__)
 
 MEMORY_FILE = Path("memory.json")
 
+PERSONALITY_FILE = Path("personality.txt")
+
+
+def load_personality():
+    if PERSONALITY_FILE.exists():
+        with open(PERSONALITY_FILE, "r", encoding="utf-8") as f:
+            return f.read()
+
+    return ""
+
+PERSONALITY = load_personality()
 
 def load_memory():
     if MEMORY_FILE.exists():
@@ -34,7 +45,6 @@ print("Loading Kokoro...")
 pipeline = KPipeline(lang_code="a")
 
 print("Kokoro ready.")
-
 
 @app.route("/chat", methods=["POST"])
 def chat():

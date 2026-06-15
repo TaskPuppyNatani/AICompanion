@@ -4,6 +4,7 @@ import winsound
 import random
 import threading
 import json
+import time
 from pathlib import Path
 
 from PyQt6.QtGui import QPixmap, QGuiApplication
@@ -16,6 +17,8 @@ app = QApplication(sys.argv)
 app_server = Flask(__name__)
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
+
+speaking = False
 
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
@@ -54,6 +57,14 @@ notifications = [
 ]
 
 def speak(message):
+
+    global speaking
+
+    if speaking:
+        return
+
+    speaking = True
+
     try:
         response = requests.post(
             "http://192.168.1.4:5001/speak",
@@ -71,6 +82,25 @@ def speak(message):
 
     except Exception as e:
         print(f"Speech error: {e}")
+
+    finally:
+        speaking = False
+          
+def ask_ratchet(event="click"):
+    try:
+        response = requests.post(
+            "http://192.168.1.4:5001/chat",
+            json={
+                "event": event
+            },
+            timeout=10
+        )
+
+        return response.json()["response"]
+
+    except Exception as e:
+        print(f"Chat error: {e}")
+        return "Ratchet seems to be thinking too hard right now."
         
 def notify(message):
     print(f"NOTIFICATION: {message}")
@@ -120,13 +150,23 @@ def receive_notification():
 
 
 class Companion(QLabel):
+
+    def __init__(self):
+        super().__init__()
+        self.last_click = 0
+
     def mousePressEvent(self, event):
-        phrase = random.choice(responses)
+
+        if time.time() - self.last_click < 0.5:
+            return
+
+        self.last_click = time.time()
+
+        phrase = ask_ratchet()
 
         print(phrase)
 
         notify(phrase)
-
 
 label = Companion()
 
@@ -138,7 +178,7 @@ notification_label.setStyleSheet("""
     border-radius: 20px;
     padding: 10px;
 """)
-
+        
 notification_label.setWordWrap(True)
 notification_label.setMaximumWidth(250)
 
@@ -187,7 +227,7 @@ label.setAttribute(
 
 label.show()
 
-startup_phrase = random.choice(startup_responses)
+startup_phrase = ask_ratchet("startup")
 
 notify(startup_phrase)
 
