@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from PyQt6.QtGui import QPixmap, QGuiApplication
-from PyQt6.QtWidgets import QApplication, QLabel, QMenu
+from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QInputDialog, QMessageBox
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
 from flask import Flask, request
 from werkzeug.serving import make_server
@@ -245,6 +245,9 @@ class Companion(QLabel):
         mute_action = self.context_menu.addAction("Mute Voice")
         mute_action.triggered.connect(self.mute_voice)
 
+        add_note_action = self.context_menu.addAction("Add Note")
+        add_note_action.triggered.connect(self.add_note_dialog)
+
     def reload_personality(self):
         print("Reload Personality selected (placeholder)")
         notify("Reload Personality is not implemented yet.")
@@ -252,6 +255,105 @@ class Companion(QLabel):
     def mute_voice(self):
         print("Mute Voice selected (placeholder)")
         notify("Mute Voice is not implemented yet.")
+
+    def add_note_dialog(self):
+        note_text, ok = QInputDialog.getText(
+            self,
+            "Add Note",
+            "Enter note:"
+        )
+
+        if not ok:
+            return
+
+        note_text = note_text.strip()
+
+        if not note_text:
+            return
+
+        category = None
+
+        try:
+            suggestion_response = requests.get(
+                "http://192.168.1.4:5001/notes/suggest-category",
+                params={"q": note_text},
+                timeout=10
+            )
+            suggestion_payload = suggestion_response.json()
+            suggested_category = suggestion_payload.get("suggestion")
+        except Exception as e:
+            print(f"Suggest category error: {e}")
+            suggested_category = None
+
+        decision_dialog = QMessageBox(self)
+        decision_dialog.setWindowTitle("Add Note Category")
+
+        if isinstance(suggested_category, str) and suggested_category.strip():
+            decision_dialog.setText(
+                f"Suggested category: {suggested_category.strip()}"
+            )
+        else:
+            decision_dialog.setText(
+                "No category suggestion found."
+            )
+
+        accept_button = decision_dialog.addButton(
+            "Accept",
+            QMessageBox.ButtonRole.AcceptRole
+        )
+        change_button = decision_dialog.addButton(
+            "Change",
+            QMessageBox.ButtonRole.ActionRole
+        )
+        skip_button = decision_dialog.addButton(
+            "Skip Category",
+            QMessageBox.ButtonRole.RejectRole
+        )
+
+        decision_dialog.setDefaultButton(accept_button)
+        decision_dialog.exec()
+
+        clicked = decision_dialog.clickedButton()
+
+        if clicked is None:
+            return
+
+        if clicked == change_button:
+            changed_category, changed_ok = QInputDialog.getText(
+                self,
+                "Change Category",
+                "Enter category (optional):"
+            )
+
+            if changed_ok and changed_category.strip():
+                category = changed_category.strip()
+
+        elif clicked == accept_button:
+            if isinstance(suggested_category, str) and suggested_category.strip():
+                category = suggested_category.strip()
+
+        elif clicked == skip_button:
+            category = None
+
+        try:
+            payload = {"note": note_text}
+
+            if category:
+                payload["category"] = category
+
+            response = requests.post(
+                "http://192.168.1.4:5001/note",
+                json=payload,
+                timeout=10
+            )
+
+            payload = response.json()
+            message = payload.get("message", "Note saved.")
+            notify(message)
+
+        except Exception as e:
+            print(f"Add note error: {e}")
+            notify("Could not save note right now.")
 
     def show_context_menu(self, event):
         self.context_menu.exec(event.globalPosition().toPoint())

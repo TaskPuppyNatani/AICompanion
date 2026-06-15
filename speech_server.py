@@ -5,6 +5,7 @@ import tempfile
 import random
 import json
 from pathlib import Path
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -13,6 +14,51 @@ MEMORY_FILE = Path("memory.json")
 PERSONALITY_FILE = Path("personality.txt")
 
 NOTES_FILE = Path(__file__).parent / "notes.json"
+
+NOTE_CONFIRMATIONS = [
+    "Saved and logged.",
+    "Note captured successfully.",
+    "Got it. Your note is saved.",
+    "Done. I wrote that down.",
+    "Locked in. Note saved.",
+    "All set. Note added.",
+    "Lombaxed, and loaded!"
+]
+
+CATEGORY_KEYWORDS = {
+    "Homelab": [
+        "docker",
+        "container",
+        "containers",
+        "kubernetes",
+        "k8s",
+        "proxmox",
+        "vm",
+        "server",
+        "nas",
+        "homelab"
+    ],
+    "Work": [
+        "meeting",
+        "ticket",
+        "jira",
+        "sprint",
+        "deploy",
+        "deadline",
+        "client",
+        "project"
+    ],
+    "Personal": [
+        "grocery",
+        "gym",
+        "family",
+        "appointment",
+        "doctor",
+        "errand",
+        "home",
+        "birthday"
+    ]
+}
 
 def load_notes():
 
@@ -27,13 +73,19 @@ def save_notes(notes):
     with open(NOTES_FILE, "w") as f:
         json.dump(notes, f, indent=4)
 
-def add_note(note_text):
+def add_note(note_text, category=None):
 
     notes = load_notes()
 
-    notes.append({
-        "note": note_text
-    })
+    note_entry = {
+        "note": note_text,
+        "timestamp": datetime.now().isoformat()
+    }
+
+    if isinstance(category, str) and category.strip():
+        note_entry["category"] = category.strip()
+
+    notes.append(note_entry)
 
     save_notes(notes)
 
@@ -41,9 +93,65 @@ def get_latest_note():
     notes = load_notes()
 
     if notes:
-        return notes[-1]["note"]
+        return notes[-1]
 
-    return "No notes yet."
+    return None
+
+def extract_note_text(note_entry):
+    if isinstance(note_entry, dict):
+        value = note_entry.get("note", "")
+        return value if isinstance(value, str) else str(value)
+
+    return str(note_entry)
+
+def extract_note_category(note_entry):
+    if isinstance(note_entry, dict):
+        value = note_entry.get("category", "")
+        return value if isinstance(value, str) else str(value)
+
+    return ""
+
+def search_notes(query):
+    notes = load_notes()
+    needle = query.lower()
+
+    return [
+        note for note in notes
+        if needle in extract_note_text(note).lower()
+    ]
+
+def get_recent_notes(limit=5):
+    notes = load_notes()
+    return list(reversed(notes[-limit:]))
+
+def filter_notes_by_category(category):
+    notes = load_notes()
+    needle = category.lower()
+
+    return [
+        note for note in notes
+        if extract_note_category(note).lower() == needle
+    ]
+
+def suggest_category(note_text):
+    if not isinstance(note_text, str):
+        return None
+
+    text = note_text.lower()
+    best_category = None
+    best_score = 0
+
+    for category, keywords in CATEGORY_KEYWORDS.items():
+        score = sum(1 for keyword in keywords if keyword in text)
+
+        if score > best_score:
+            best_category = category
+            best_score = score
+
+    if best_score == 0:
+        return None
+
+    return best_category
 
 def load_personality():
     if PERSONALITY_FILE.exists():
@@ -174,6 +282,7 @@ def note():
     data = request.json or {}
 
     note_text = data.get("note")
+    category = data.get("category")
 
     if not note_text:
         return {
@@ -181,10 +290,11 @@ def note():
             "message": "No note provided"
         }, 400
 
-    add_note(note_text)
+    add_note(note_text, category=category)
 
     return {
-        "status": "saved"
+        "status": "saved",
+        "message": random.choice(NOTE_CONFIRMATIONS)
     }
 
 @app.route("/notes/latest", methods=["GET"])
@@ -202,6 +312,38 @@ def latest_note():
 @app.route("/notes", methods=["GET"])
 def get_notes():
     return jsonify(load_notes())
+
+@app.route("/notes/search", methods=["GET"])
+def search_notes_endpoint():
+    query = request.args.get("q", "")
+
+    if not isinstance(query, str) or not query.strip():
+        return jsonify([])
+
+    matches = search_notes(query.strip())
+    return jsonify(matches)
+
+@app.route("/notes/recent", methods=["GET"])
+def recent_notes_endpoint():
+    return jsonify(get_recent_notes(5))
+
+@app.route("/notes/category/<category>", methods=["GET"])
+def notes_by_category_endpoint(category):
+    if not isinstance(category, str) or not category.strip():
+        return jsonify([])
+
+    matches = filter_notes_by_category(category.strip())
+    return jsonify(matches)
+
+@app.route("/notes/suggest-category", methods=["GET"])
+def suggest_category_endpoint():
+    query = request.args.get("q", "")
+
+    if not isinstance(query, str) or not query.strip():
+        return jsonify({"suggestion": None})
+
+    suggestion = suggest_category(query.strip())
+    return jsonify({"suggestion": suggestion})
 
 @app.route("/speak", methods=["POST"])
 def speak():
