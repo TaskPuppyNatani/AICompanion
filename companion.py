@@ -24,6 +24,38 @@ with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
 
 
+def saved_avatar_position():
+    position = config.get("avatar_position")
+
+    if not isinstance(position, dict):
+        return None
+
+    try:
+        return int(position["x"]), int(position["y"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def save_avatar_position(new_x, new_y):
+    config["avatar_position"] = {
+        "x": int(new_x),
+        "y": int(new_y)
+    }
+
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(config, f, indent=4)
+        f.write("\n")
+
+
+def set_avatar_position(new_x, new_y):
+    global x, y
+
+    x = int(new_x)
+    y = int(new_y)
+
+    label.move(x, y)
+
+
 class NotificationBridge(QObject):
     notify_signal = pyqtSignal(str)
 
@@ -155,8 +187,22 @@ class Companion(QLabel):
         super().__init__()
 
         self.last_click = 0
+        self.drag_offset = None
+        self.dragged = False
 
     def mousePressEvent(self, event):
+
+        if event.button() == Qt.MouseButton.RightButton:
+            self.drag_offset = (
+                event.globalPosition().toPoint()
+                - self.frameGeometry().topLeft()
+            )
+            self.dragged = False
+            event.accept()
+            return
+
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
 
         if time.time() - self.last_click < 0.5:
             return
@@ -167,7 +213,32 @@ class Companion(QLabel):
 
         print(phrase)
 
-        notify(phrase)       
+        notify(phrase)
+
+    def mouseMoveEvent(self, event):
+
+        if (
+            self.drag_offset is None
+            or not event.buttons() & Qt.MouseButton.RightButton
+        ):
+            return
+
+        new_position = event.globalPosition().toPoint() - self.drag_offset
+        set_avatar_position(new_position.x(), new_position.y())
+        self.dragged = True
+        event.accept()
+
+    def mouseReleaseEvent(self, event):
+
+        if event.button() != Qt.MouseButton.RightButton:
+            return
+
+        if self.dragged:
+            save_avatar_position(x, y)
+
+        self.drag_offset = None
+        self.dragged = False
+        event.accept()
 label = Companion()
 
 notification_label = QLabel("")
@@ -212,6 +283,11 @@ geometry = screen.availableGeometry()
 
 x = geometry.width() - pixmap.width() - 20
 y = geometry.height() - pixmap.height() - 20
+
+saved_position = saved_avatar_position()
+
+if saved_position is not None:
+    x, y = saved_position
 
 label.move(x, y)
 
