@@ -26,7 +26,7 @@ from companion_app.local_notify_server import (
 )
 
 from config_store import config, saved_avatar_position, save_avatar_position
-from companion_app import api_client
+from companion_app import api_client, note_workflow
 
 try:
     import numpy as np
@@ -222,8 +222,7 @@ class Companion(QLabel):
         category = None
 
         try:
-            suggestion_payload = api_client.suggest_category(note_text)
-            suggested_category = suggestion_payload.get("suggestion")
+            suggested_category = note_workflow.request_category_suggestion(note_text)
         except Exception as e:
             print(f"Suggest category error: {e}")
             suggested_category = None
@@ -280,23 +279,25 @@ class Companion(QLabel):
 
         return category, True
 
-    def save_note(self, note_text, category=None):
+    def finalize_note_workflow(self, note_text):
+        category, should_continue = self.pick_note_category(note_text)
+
         try:
-            payload = api_client.save_note(note_text, category)
+            did_save, payload = note_workflow.finalize_note_workflow(
+                note_text,
+                category,
+                should_continue
+            )
+
+            if not did_save:
+                return
+
             message = payload.get("message", "Note saved.")
             notify(message)
 
         except Exception as e:
             print(f"Add note error: {e}")
             notify("Could not save note right now.")
-
-    def finalize_note_workflow(self, note_text):
-        category, should_continue = self.pick_note_category(note_text)
-
-        if not should_continue:
-            return
-
-        self.save_note(note_text, category)
 
     def clear_transcribing_dialog(self):
         if self.transcribing_dialog is None:
@@ -402,8 +403,7 @@ class Companion(QLabel):
             self.transcribing_dialog.show()
             QApplication.processEvents()
 
-            payload = api_client.transcribe_audio(temp_audio_path)
-            transcript_text = payload.get("text", "").strip()
+            transcript_text = note_workflow.request_transcription(temp_audio_path)
 
         except Exception as e:
             print(f"Voice transcription error: {e}")
