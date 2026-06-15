@@ -12,6 +12,38 @@ MEMORY_FILE = Path("memory.json")
 
 PERSONALITY_FILE = Path("personality.txt")
 
+NOTES_FILE = Path(__file__).parent / "notes.json"
+
+def load_notes():
+
+    if NOTES_FILE.exists():
+        with open(NOTES_FILE, "r") as f:
+            return json.load(f)
+
+    return []
+
+def save_notes(notes):
+
+    with open(NOTES_FILE, "w") as f:
+        json.dump(notes, f, indent=4)
+
+def add_note(note_text):
+
+    notes = load_notes()
+
+    notes.append({
+        "note": note_text
+    })
+
+    save_notes(notes)
+
+def get_latest_note():
+    notes = load_notes()
+
+    if notes:
+        return notes[-1]["note"]
+
+    return "No notes yet."
 
 def load_personality():
     if PERSONALITY_FILE.exists():
@@ -54,6 +86,11 @@ def chat():
     data = request.json or {}
 
     event = data.get("event", "click")
+    sender = data.get("sender")
+    if isinstance(sender, str):
+        sender = sender.strip()
+    else:
+        sender = ""
 
     # Track usage
     if event == "click":
@@ -84,13 +121,22 @@ def chat():
         "You've got a Discord notification waiting."
     ]
 
+    discord_sender_responses = [
+        f"{sender} sent you a Discord message.",
+        f"Looks like {sender} is trying to get your attention.",
+        f"You've got a Discord notification from {sender} waiting."
+    ]
+
     if event == "startup":
 
         response = random.choice(startup_responses)
 
     elif event == "discord":
 
-        response = random.choice(discord_responses)
+        if sender:
+            response = random.choice(discord_sender_responses)
+        else:
+            response = random.choice(discord_responses)
 
     else:
 
@@ -122,6 +168,40 @@ def chat():
         "response": response
     })
 
+@app.route("/note", methods=["POST"])
+def note():
+
+    data = request.json or {}
+
+    note_text = data.get("note")
+
+    if not note_text:
+        return {
+            "status": "error",
+            "message": "No note provided"
+        }, 400
+
+    add_note(note_text)
+
+    return {
+        "status": "saved"
+    }
+
+@app.route("/notes/latest", methods=["GET"])
+def latest_note():
+
+    note = get_latest_note()
+
+    if not note:
+        return jsonify({
+            "status": "empty"
+        })
+
+    return jsonify(note)
+
+@app.route("/notes", methods=["GET"])
+def get_notes():
+    return jsonify(load_notes())
 
 @app.route("/speak", methods=["POST"])
 def speak():

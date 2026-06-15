@@ -8,9 +8,10 @@ import time
 from pathlib import Path
 
 from PyQt6.QtGui import QPixmap, QGuiApplication
-from PyQt6.QtWidgets import QApplication, QLabel
+from PyQt6.QtWidgets import QApplication, QLabel, QMenu
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
 from flask import Flask, request
+from werkzeug.serving import make_server
 
 app = QApplication(sys.argv)
 
@@ -67,8 +68,6 @@ responses = [
     "How are you doing?",
     "Ratchet seems quiet today.",
     "Rivet seems to be fine.",
-    "How is Danny doing?",
-    "Danny sent you a Discord message and Ratchet is generating speech through Kokoro.",
     "No emergencies detected.",
     "All systems nominal.",
 ]
@@ -81,7 +80,6 @@ startup_responses = [
 ]
 
 notifications = [
-    "Danny sent you a Discord message.",
     "New email received.",
     "Rivet reports all services healthy.",
     "Ratchet reports all services healthy.",
@@ -118,13 +116,18 @@ def speak(message):
     finally:
         speaking = False
 
-def ask_ratchet(event="click"):
+def ask_ratchet(event="click", sender=None):
     try:
+        payload = {
+            "event": event
+        }
+
+        if sender:
+            payload["sender"] = sender
+
         response = requests.post(
             "http://192.168.1.4:5001/chat",
-            json={
-                "event": event
-            },
+            json=payload,
             timeout=10
         )
 
@@ -165,14 +168,56 @@ def notify(message):
 bridge.notify_signal.connect(notify)
 
 
+class NotificationServerThread(threading.Thread):
+
+    def __init__(self, flask_app, host, port):
+        super().__init__(daemon=False)
+        self.server = make_server(host, port, flask_app)
+
+    def run(self):
+        self.server.serve_forever()
+
+    def shutdown(self):
+        self.server.shutdown()
+        self.server.server_close()
+
+
+is_shutting_down = False
+notification_server_thread = None
+
+
+def clean_exit():
+    global is_shutting_down
+
+    if is_shutting_down:
+        return
+
+    is_shutting_down = True
+
+    notification_label.hide()
+    label.hide()
+
+    if notification_server_thread is not None:
+        notification_server_thread.shutdown()
+        notification_server_thread.join(timeout=3)
+
+    app.quit()
+
+
 @app_server.route("/notify", methods=["POST"])
 def receive_notification():
-    data = request.json
+    data = request.json or {}
 
-    message = data.get(
-        "message",
-        "Notification received"
-    )
+    event = data.get("event")
+    sender = data.get("sender")
+
+    if event == "discord":
+        message = ask_ratchet(event, sender)
+    else:
+        message = data.get(
+            "message",
+            "Notification received"
+        )
 
     print(f"RECEIVED: {message}")
 
@@ -189,10 +234,36 @@ class Companion(QLabel):
         self.last_click = 0
         self.drag_offset = None
         self.dragged = False
+        self.context_menu = QMenu(self)
+
+        exit_action = self.context_menu.addAction("Exit")
+        exit_action.triggered.connect(clean_exit)
+
+        reload_action = self.context_menu.addAction("Reload Personality")
+        reload_action.triggered.connect(self.reload_personality)
+
+        mute_action = self.context_menu.addAction("Mute Voice")
+        mute_action.triggered.connect(self.mute_voice)
+
+    def reload_personality(self):
+        print("Reload Personality selected (placeholder)")
+        notify("Reload Personality is not implemented yet.")
+
+    def mute_voice(self):
+        print("Mute Voice selected (placeholder)")
+        notify("Mute Voice is not implemented yet.")
+
+    def show_context_menu(self, event):
+        self.context_menu.exec(event.globalPosition().toPoint())
 
     def mousePressEvent(self, event):
 
         if event.button() == Qt.MouseButton.RightButton:
+            if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+                self.show_context_menu(event)
+                event.accept()
+                return
+
             self.drag_offset = (
                 event.globalPosition().toPoint()
                 - self.frameGeometry().topLeft()
@@ -314,14 +385,14 @@ QTimer.singleShot(
     lambda: notify(random.choice(notifications))
 )
 
-threading.Thread(
-    target=lambda: app_server.run(
-        host="127.0.0.1",
-        port=5000,
-        debug=False,
-        use_reloader=False
-    ),
-    daemon=True
-).start()
+notification_server_thread = NotificationServerThread(
+    flask_app=app_server,
+    host="127.0.0.1",
+    port=5000
+)
+
+notification_server_thread.start()
+
+app.aboutToQuit.connect(clean_exit)
 
 sys.exit(app.exec())
