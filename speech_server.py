@@ -4,8 +4,14 @@ import soundfile as sf
 import tempfile
 import random
 import json
+import threading
 from pathlib import Path
 from datetime import datetime
+
+try:
+    from faster_whisper import WhisperModel
+except Exception:
+    WhisperModel = None
 
 app = Flask(__name__)
 
@@ -59,6 +65,10 @@ CATEGORY_KEYWORDS = {
         "birthday"
     ]
 }
+
+STT_MODEL_NAME = "small.en"
+stt_model = None
+stt_model_lock = threading.Lock()
 
 def load_notes():
 
@@ -152,6 +162,23 @@ def suggest_category(note_text):
         return None
 
     return best_category
+
+def get_stt_model():
+    global stt_model
+
+    if WhisperModel is None:
+        return None
+
+    if stt_model is None:
+        with stt_model_lock:
+            if stt_model is None:
+                stt_model = WhisperModel(
+                    STT_MODEL_NAME,
+                    device="cpu",
+                    compute_type="int8"
+                )
+
+    return stt_model
 
 def load_personality():
     if PERSONALITY_FILE.exists():
@@ -344,6 +371,67 @@ def suggest_category_endpoint():
 
     suggestion = suggest_category(query.strip())
     return jsonify({"suggestion": suggestion})
+
+@app.route("/notes/transcribe", methods=["POST"])
+def transcribe_note_endpoint():
+    uploaded_audio = request.files.get("audio")
+
+    if uploaded_audio is None:
+        return jsonify({
+            "status": "error",
+            "message": "No audio file provided"
+        }), 400
+
+    model = get_stt_model()
+
+    if model is None:
+        return jsonify({
+            "status": "error",
+            "message": "Faster-Whisper is not available"
+        }), 503
+
+    temp_audio_path = None
+
+    try:
+        temp_audio = tempfile.NamedTemporaryFile(
+            suffix=".wav",
+            delete=False
+        )
+        temp_audio_path = temp_audio.name
+        temp_audio.close()
+
+        uploaded_audio.save(temp_audio_path)
+
+        segments, _ = model.transcribe(
+            temp_audio_path,
+            beam_size=1,
+            language="en"
+        )
+
+        text = " ".join(
+            segment.text.strip()
+            for segment in segments
+            if segment.text and segment.text.strip()
+        ).strip()
+
+        return jsonify({
+            "status": "ok",
+            "text": text
+        })
+
+    except Exception as e:
+        print(f"Transcription error: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "Transcription failed"
+        }), 500
+
+    finally:
+        if temp_audio_path:
+            try:
+                Path(temp_audio_path).unlink()
+            except OSError:
+                pass
 
 @app.route("/speak", methods=["POST"])
 def speak():

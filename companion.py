@@ -5,13 +5,33 @@ import random
 import threading
 import json
 import time
+import tempfile
 from pathlib import Path
 
 from PyQt6.QtGui import QPixmap, QGuiApplication
-from PyQt6.QtWidgets import QApplication, QLabel, QMenu, QInputDialog, QMessageBox
+from PyQt6.QtWidgets import (
+    QApplication,
+    QLabel,
+    QMenu,
+    QInputDialog,
+    QMessageBox,
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton
+)
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
 from flask import Flask, request
 from werkzeug.serving import make_server
+
+try:
+    import numpy as np
+    import sounddevice as sd
+    import soundfile as sf_audio
+except Exception:
+    np = None
+    sd = None
+    sf_audio = None
 
 app = QApplication(sys.argv)
 
@@ -234,6 +254,7 @@ class Companion(QLabel):
         self.last_click = 0
         self.drag_offset = None
         self.dragged = False
+        self.transcribing_dialog = None
         self.context_menu = QMenu(self)
 
         exit_action = self.context_menu.addAction("Exit")
@@ -247,6 +268,9 @@ class Companion(QLabel):
 
         add_note_action = self.context_menu.addAction("Add Note")
         add_note_action.triggered.connect(self.add_note_dialog)
+
+        voice_note_action = self.context_menu.addAction("Voice Note")
+        voice_note_action.triggered.connect(self.voice_note_dialog)
 
     def reload_personality(self):
         print("Reload Personality selected (placeholder)")
@@ -271,6 +295,9 @@ class Companion(QLabel):
         if not note_text:
             return
 
+        self.finalize_note_workflow(note_text)
+
+    def pick_note_category(self, note_text):
         category = None
 
         try:
@@ -316,7 +343,7 @@ class Companion(QLabel):
         clicked = decision_dialog.clickedButton()
 
         if clicked is None:
-            return
+            return None, False
 
         if clicked == change_button:
             changed_category, changed_ok = QInputDialog.getText(
@@ -335,12 +362,15 @@ class Companion(QLabel):
         elif clicked == skip_button:
             category = None
 
+        return category, True
+
+    def save_note(self, note_text, category=None):
+        payload = {"note": note_text}
+
+        if category:
+            payload["category"] = category
+
         try:
-            payload = {"note": note_text}
-
-            if category:
-                payload["category"] = category
-
             response = requests.post(
                 "http://192.168.1.4:5001/note",
                 json=payload,
@@ -354,6 +384,168 @@ class Companion(QLabel):
         except Exception as e:
             print(f"Add note error: {e}")
             notify("Could not save note right now.")
+
+    def finalize_note_workflow(self, note_text):
+        category, should_continue = self.pick_note_category(note_text)
+
+        if not should_continue:
+            return
+
+        self.save_note(note_text, category)
+
+    def clear_transcribing_dialog(self):
+        if self.transcribing_dialog is None:
+            return
+
+        try:
+            self.transcribing_dialog.hide()
+            self.transcribing_dialog.close()
+            self.transcribing_dialog.deleteLater()
+        finally:
+            self.transcribing_dialog = None
+
+    def voice_note_dialog(self):
+        if np is None or sd is None or sf_audio is None:
+            notify("Voice Note requires sounddevice, soundfile, and numpy.")
+            return
+
+        sample_rate = 16000
+        audio_frames = []
+        recording_state = {"stopped": False}
+
+        def audio_callback(indata, frames, callback_time, status):
+            if status:
+                print(f"Recording status: {status}")
+            audio_frames.append(indata.copy())
+
+        record_dialog = QDialog(self)
+        record_dialog.setWindowTitle("Voice Note")
+        record_dialog.setModal(True)
+
+        dialog_layout = QVBoxLayout(record_dialog)
+        dialog_layout.addWidget(QLabel("Recording..."))
+
+        button_layout = QHBoxLayout()
+        stop_button = QPushButton("Stop")
+        cancel_button = QPushButton("Cancel")
+        button_layout.addWidget(stop_button)
+        button_layout.addWidget(cancel_button)
+        dialog_layout.addLayout(button_layout)
+
+        def on_stop_clicked():
+            recording_state["stopped"] = True
+            record_dialog.accept()
+
+        stop_button.clicked.connect(on_stop_clicked)
+        cancel_button.clicked.connect(record_dialog.reject)
+
+        stream = None
+
+        try:
+            stream = sd.InputStream(
+                samplerate=sample_rate,
+                channels=1,
+                dtype="float32",
+                callback=audio_callback
+            )
+            stream.start()
+            record_dialog.exec()
+        except Exception as e:
+            print(f"Voice recording error: {e}")
+            notify("Could not start voice recording.")
+            return
+        finally:
+            if stream is not None:
+                try:
+                    stream.stop()
+                    stream.close()
+                except Exception as close_error:
+                    print(f"Voice stream close error: {close_error}")
+
+        if not recording_state["stopped"]:
+            return
+
+        if not audio_frames:
+            notify("No audio captured.")
+            return
+
+        temp_audio_path = None
+        transcript_text = ""
+
+        try:
+            waveform = np.concatenate(audio_frames, axis=0)
+
+            temp_audio = tempfile.NamedTemporaryFile(
+                suffix=".wav",
+                delete=False
+            )
+            temp_audio_path = temp_audio.name
+            temp_audio.close()
+
+            sf_audio.write(temp_audio_path, waveform, sample_rate)
+
+            # Ensure no stale status dialog remains before showing a new one.
+            self.clear_transcribing_dialog()
+
+            self.transcribing_dialog = QMessageBox(self)
+            self.transcribing_dialog.setWindowTitle("Voice Note")
+            self.transcribing_dialog.setText("Transcribing...")
+            self.transcribing_dialog.setStandardButtons(
+                QMessageBox.StandardButton.NoButton
+            )
+            self.transcribing_dialog.setModal(True)
+            self.transcribing_dialog.show()
+            QApplication.processEvents()
+
+            with open(temp_audio_path, "rb") as audio_file:
+                response = requests.post(
+                    "http://192.168.1.4:5001/notes/transcribe",
+                    files={
+                        "audio": (
+                            "voice_note.wav",
+                            audio_file,
+                            "audio/wav"
+                        )
+                    },
+                    timeout=120
+                )
+
+            payload = response.json()
+            transcript_text = payload.get("text", "").strip()
+
+        except Exception as e:
+            print(f"Voice transcription error: {e}")
+            notify("Could not transcribe voice note right now.")
+            return
+        finally:
+            self.clear_transcribing_dialog()
+
+            if temp_audio_path:
+                try:
+                    Path(temp_audio_path).unlink()
+                except OSError:
+                    pass
+
+        if not transcript_text:
+            notify("No speech detected.")
+            return
+
+        reviewed_text, reviewed_ok = QInputDialog.getMultiLineText(
+            self,
+            "Review Transcript",
+            "Edit note:",
+            transcript_text
+        )
+
+        if not reviewed_ok:
+            return
+
+        reviewed_text = reviewed_text.strip()
+
+        if not reviewed_text:
+            return
+
+        self.finalize_note_workflow(reviewed_text)
 
     def show_context_menu(self, event):
         self.context_menu.exec(event.globalPosition().toPoint())
