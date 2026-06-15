@@ -19,8 +19,11 @@ from PyQt6.QtWidgets import (
     QPushButton
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
-from flask import Flask, request
-from werkzeug.serving import make_server
+from companion_app.local_notify_server import (
+    register_notify_callback,
+    start_notification_server,
+    stop_notification_server,
+)
 
 from config_store import config, saved_avatar_position, save_avatar_position
 from companion_app import api_client
@@ -36,7 +39,6 @@ except Exception:
 
 app = QApplication(sys.argv)
 
-app_server = Flask(__name__)
 
 speaking = False
 
@@ -146,22 +148,8 @@ def notify(message):
 bridge.notify_signal.connect(notify)
 
 
-class NotificationServerThread(threading.Thread):
-
-    def __init__(self, flask_app, host, port):
-        super().__init__(daemon=False)
-        self.server = make_server(host, port, flask_app)
-
-    def run(self):
-        self.server.serve_forever()
-
-    def shutdown(self):
-        self.server.shutdown()
-        self.server.server_close()
-
-
 is_shutting_down = False
-notification_server_thread = None
+register_notify_callback(bridge.notify_signal.emit)
 
 
 def clean_exit():
@@ -175,34 +163,9 @@ def clean_exit():
     notification_label.hide()
     label.hide()
 
-    if notification_server_thread is not None:
-        notification_server_thread.shutdown()
-        notification_server_thread.join(timeout=3)
+    stop_notification_server(timeout=3)
 
     app.quit()
-
-
-@app_server.route("/notify", methods=["POST"])
-def receive_notification():
-    data = request.json or {}
-
-    event = data.get("event")
-    sender = data.get("sender")
-
-    if event == "discord":
-        message = ask_ratchet(event, sender)
-    else:
-        message = data.get(
-            "message",
-            "Notification received"
-        )
-
-    print(f"RECEIVED: {message}")
-
-    bridge.notify_signal.emit(message)
-
-    return {"status": "ok"}
-
 
 class Companion(QLabel):
 
@@ -608,13 +571,11 @@ QTimer.singleShot(
     lambda: notify(random.choice(notifications))
 )
 
-notification_server_thread = NotificationServerThread(
-    flask_app=app_server,
+start_notification_server(
     host="127.0.0.1",
-    port=5000
+    port=5000,
+    chat_resolver=ask_ratchet
 )
-
-notification_server_thread.start()
 
 app.aboutToQuit.connect(clean_exit)
 
