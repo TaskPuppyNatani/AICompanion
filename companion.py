@@ -85,7 +85,7 @@ def speak(message):
 
     finally:
         speaking = False
-          
+
 def ask_ratchet(event="click"):
     try:
         response = requests.post(
@@ -153,6 +153,7 @@ class Companion(QLabel):
 
     def __init__(self):
         super().__init__()
+
         self.last_click = 0
 
     def mousePressEvent(self, event):
@@ -166,8 +167,7 @@ class Companion(QLabel):
 
         print(phrase)
 
-        notify(phrase)
-
+        notify(phrase)       
 label = Companion()
 
 notification_label = QLabel("")
