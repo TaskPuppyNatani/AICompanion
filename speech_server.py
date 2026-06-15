@@ -8,6 +8,14 @@ import threading
 from pathlib import Path
 from datetime import datetime
 
+from speech_data.notes_data import NOTE_CONFIRMATIONS, CATEGORY_KEYWORDS
+from speech_data.chat_data import (
+    CLICK_RESPONSES,
+    STARTUP_RESPONSES,
+    DISCORD_RESPONSES,
+    DISCORD_SENDER_RESPONSES,
+)
+
 try:
     from faster_whisper import WhisperModel
 except Exception:
@@ -20,51 +28,6 @@ MEMORY_FILE = Path("memory.json")
 PERSONALITY_FILE = Path("personality.txt")
 
 NOTES_FILE = Path(__file__).parent / "notes.json"
-
-NOTE_CONFIRMATIONS = [
-    "Saved and logged.",
-    "Note captured successfully.",
-    "Got it. Your note is saved.",
-    "Done. I wrote that down.",
-    "Locked in. Note saved.",
-    "All set. Note added.",
-    "Lombaxed, and loaded!"
-]
-
-CATEGORY_KEYWORDS = {
-    "Homelab": [
-        "docker",
-        "container",
-        "containers",
-        "kubernetes",
-        "k8s",
-        "proxmox",
-        "vm",
-        "server",
-        "nas",
-        "homelab"
-    ],
-    "Work": [
-        "meeting",
-        "ticket",
-        "jira",
-        "sprint",
-        "deploy",
-        "deadline",
-        "client",
-        "project"
-    ],
-    "Personal": [
-        "grocery",
-        "gym",
-        "family",
-        "appointment",
-        "doctor",
-        "errand",
-        "home",
-        "birthday"
-    ]
-}
 
 STT_MODEL_NAME = "small.en"
 stt_model = None
@@ -236,30 +199,17 @@ def chat():
 
     save_memory(memory)
 
-    click_responses = [
-        "Looks like you're working on me again.",
-        "Ratchet seems proud of today's upgrades.",
-        "You've clicked me three times already.",
-        "I approve of this level of attention."
-    ]
-
-    startup_responses = [
-        "Good morning, Pup.",
-        "Systems online and ready.",
-        "Ratchet and I are standing by.",
-        "Ready for another day of tinkering?"
-    ]
+    click_responses = CLICK_RESPONSES
+    startup_responses = STARTUP_RESPONSES
 
     discord_responses = [
-        "Someone sent you a message.",
-        "Looks like someone is trying to get your attention.",
-        "You've got a Discord notification waiting."
+        message.format(sender=sender)
+        for message in DISCORD_RESPONSES
     ]
 
     discord_sender_responses = [
-        f"{sender} sent you a Discord message.",
-        f"Looks like {sender} is trying to get your attention.",
-        f"You've got a Discord notification from {sender} waiting."
+        message.format(sender=sender)
+        for message in DISCORD_SENDER_RESPONSES
     ]
 
     if event == "startup":
