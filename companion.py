@@ -1,5 +1,4 @@
 import sys
-import requests
 import winsound
 import random
 import threading
@@ -24,6 +23,7 @@ from flask import Flask, request
 from werkzeug.serving import make_server
 
 from config_store import config, saved_avatar_position, save_avatar_position
+from companion_app import api_client
 
 try:
     import numpy as np
@@ -89,14 +89,10 @@ def speak(message):
     speaking = True
 
     try:
-        response = requests.post(
-            "http://192.168.1.4:5001/speak",
-            json={"text": message},
-            timeout=30
-        )
+        audio_content = api_client.speak(message)
 
         with open("speech.wav", "wb") as f:
-            f.write(response.content)
+            f.write(audio_content)
 
         winsound.PlaySound(
             "speech.wav",
@@ -111,20 +107,9 @@ def speak(message):
 
 def ask_ratchet(event="click", sender=None):
     try:
-        payload = {
-            "event": event
-        }
+        response = api_client.chat(event, sender)
 
-        if sender:
-            payload["sender"] = sender
-
-        response = requests.post(
-            "http://192.168.1.4:5001/chat",
-            json=payload,
-            timeout=10
-        )
-
-        return response.json()["response"]
+        return response["response"]
 
     except Exception as e:
         print(f"Chat error: {e}")
@@ -274,12 +259,7 @@ class Companion(QLabel):
         category = None
 
         try:
-            suggestion_response = requests.get(
-                "http://192.168.1.4:5001/notes/suggest-category",
-                params={"q": note_text},
-                timeout=10
-            )
-            suggestion_payload = suggestion_response.json()
+            suggestion_payload = api_client.suggest_category(note_text)
             suggested_category = suggestion_payload.get("suggestion")
         except Exception as e:
             print(f"Suggest category error: {e}")
@@ -338,19 +318,8 @@ class Companion(QLabel):
         return category, True
 
     def save_note(self, note_text, category=None):
-        payload = {"note": note_text}
-
-        if category:
-            payload["category"] = category
-
         try:
-            response = requests.post(
-                "http://192.168.1.4:5001/note",
-                json=payload,
-                timeout=10
-            )
-
-            payload = response.json()
+            payload = api_client.save_note(note_text, category)
             message = payload.get("message", "Note saved.")
             notify(message)
 
@@ -470,20 +439,7 @@ class Companion(QLabel):
             self.transcribing_dialog.show()
             QApplication.processEvents()
 
-            with open(temp_audio_path, "rb") as audio_file:
-                response = requests.post(
-                    "http://192.168.1.4:5001/notes/transcribe",
-                    files={
-                        "audio": (
-                            "voice_note.wav",
-                            audio_file,
-                            "audio/wav"
-                        )
-                    },
-                    timeout=120
-                )
-
-            payload = response.json()
+            payload = api_client.transcribe_audio(temp_audio_path)
             transcript_text = payload.get("text", "").strip()
 
         except Exception as e:
