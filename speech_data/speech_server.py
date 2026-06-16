@@ -9,6 +9,10 @@ from pathlib import Path
 from datetime import datetime
 from config import PERSONALITY_FILE
 from config import NOTES_FILE
+from config import (
+    SPEECH_SERVER_HOST,
+    SPEECH_SERVER_PORT,
+)
 
 from speech_data.notes_data import NOTE_CONFIRMATIONS, CATEGORY_KEYWORDS
 from speech_data.chat_data import (
@@ -520,6 +524,6 @@ def reload_personality():
 
 if __name__ == "__main__":
     app.run(
-        host="0.0.0.0",
-        port=5001
+        host=SPEECH_SERVER_HOST,
+        port=SPEECH_SERVER_PORT,
     )
