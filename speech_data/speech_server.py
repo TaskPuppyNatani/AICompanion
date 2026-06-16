@@ -28,7 +28,7 @@ app = Flask(__name__)
 
 MEMORY_FILE = Path("memory.json")
 
-PERSONALITY_FILE = Path("personality.md")
+PERSONALITY_FILE = Path("speech_data/personality.md")
 
 NOTES_FILE = Path(__file__).parent / "notes.json"
 
@@ -310,13 +310,16 @@ def chat():
 
                 llm_click_response = None
 
-                if event == "click" and random.random() < 0.10:
+                if event == "click" and random.random() < 1.0:
                     click_context = build_llm_context(
                         latest_note_text=latest_note_text or None
                     )
+                    print("AI CLICK TRIGGERED")
                     llm_click_response = llm_service.generate_click_response(
                         click_context
                     )
+
+                    print("LLM CLICK RESPONSE:", repr(llm_click_response))
 
                 if has_llm_text(llm_click_response):
                     response = llm_click_response.strip()

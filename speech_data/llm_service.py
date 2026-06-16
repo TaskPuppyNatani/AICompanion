@@ -13,8 +13,8 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 
-OLLAMA_GENERATE_URL = "http://192.168.1.4:11434/api/generate"
-OLLAMA_MODEL_NAME = "llama3.1:latest"
+OLLAMA_GENERATE_URL = "http://127.0.0.1:11434/api/generate"
+OLLAMA_MODEL_NAME = "phi4-mini:latest"
 
 
 class LLMService:
@@ -80,7 +80,9 @@ class LLMService:
                 response_data = response.read().decode("utf-8")
 
             parsed = json.loads(response_data)
-        except (OSError, URLError, ValueError, TypeError):
+
+        except (OSError, URLError, ValueError, TypeError) as e:
+            print("OLLAMA FAILED:", repr(e))
             return None
 
         generated_text = parsed.get("response")
