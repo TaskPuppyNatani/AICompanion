@@ -7,6 +7,8 @@ import json
 import threading
 from pathlib import Path
 from datetime import datetime
+from config import PERSONALITY_FILE
+from config import NOTES_FILE
 
 from speech_data.notes_data import NOTE_CONFIRMATIONS, CATEGORY_KEYWORDS
 from speech_data.chat_data import (
@@ -28,9 +30,9 @@ app = Flask(__name__)
 
 MEMORY_FILE = Path("memory.json")
 
-PERSONALITY_FILE = Path("speech_data/personality.md")
+#PERSONALITY_FILE = Path("speech_data/personality.md")
 
-NOTES_FILE = Path(__file__).parent / "notes.json"
+#NOTES_FILE = Path(__file__).parent / "notes.json"
 
 STT_MODEL_NAME = "small.en"
 stt_model = None
