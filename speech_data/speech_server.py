@@ -11,6 +11,7 @@ from datetime import datetime
 from speech_data.notes_data import NOTE_CONFIRMATIONS, CATEGORY_KEYWORDS
 from speech_data.chat_data import (
     CLICK_RESPONSES,
+    CLICK_MEMORY_RESPONSES,
     CLICK_MILESTONES,
     STARTUP_RESPONSES,
     DISCORD_RESPONSES,
@@ -234,16 +235,27 @@ def chat():
             response = milestone_response
 
         else:
+            latest_note = get_latest_note() if event == "click" else None
+            latest_note_text = extract_note_text(latest_note).strip() if latest_note else ""
 
-            available_responses = [
-                r for r in click_responses
-                if r != memory["last_response"]
-            ]
-
-            if available_responses:
-                response = random.choice(available_responses)
+            if (
+                event == "click"
+                and latest_note_text
+                and random.random() < 0.2
+            ):
+                template = random.choice(CLICK_MEMORY_RESPONSES)
+                response = template.format(note=latest_note_text)
             else:
-                response = random.choice(click_responses)
+
+                available_responses = [
+                    r for r in click_responses
+                    if r != memory["last_response"]
+                ]
+
+                if available_responses:
+                    response = random.choice(available_responses)
+                else:
+                    response = random.choice(click_responses)
 
     memory["last_response"] = response
     save_memory(memory)

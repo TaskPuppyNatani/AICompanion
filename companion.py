@@ -35,7 +35,13 @@ from companion_app.local_notify_server import (
     stop_notification_server,
 )
 
-from config_store import config, saved_avatar_position, save_avatar_position
+from config_store import (
+    config,
+    saved_avatar_position,
+    save_avatar_position,
+    voice_enabled,
+    save_voice_enabled,
+)
 from companion_app import api_client, note_workflow
 from companion_app import voice_capture
 
@@ -181,6 +187,9 @@ notifications = [
 def speak(message):
 
     global speaking
+
+    if not voice_enabled():
+        return
 
     if speaking:
         return
@@ -331,8 +340,13 @@ class Companion(QLabel):
             notify("Failed to reload personality.")
 
     def mute_voice(self):
-        print("Mute Voice selected (placeholder)")
-        notify("Mute Voice is not implemented yet.")
+        enabled = not voice_enabled()
+        save_voice_enabled(enabled)
+
+        if enabled:
+            notify("Voice unmuted.")
+        else:
+            notify("Voice muted.")
 
     def add_note_dialog(self):
         note_text, ok = QInputDialog.getText(

@@ -25,6 +25,13 @@ CLICK_RESPONSES = [
     "You're remarkably committed to this process."
 ]
 
+CLICK_MEMORY_RESPONSES = [
+    "Pup, about that note: '{note}'...",
+    "I noticed you wrote down '{note}'.",
+    "Should I be concerned that '{note}' is still on the list?",
+    "My records indicate: '{note}'."
+]
+
 CLICK_MILESTONES = {
     1: "First click recorded. For science.",
     10: "Ten clicks already? You're either testing me or entertaining yourself.",
