@@ -17,6 +17,7 @@ from speech_data.chat_data import (
     DISCORD_RESPONSES,
     DISCORD_SENDER_RESPONSES,
 )
+from speech_data.llm_service import LLMService
 
 try:
     from faster_whisper import WhisperModel
@@ -153,6 +154,7 @@ def load_personality():
     return ""
 
 PERSONALITY = load_personality()
+llm_service = LLMService()
 
 def load_memory():
     if MEMORY_FILE.exists():
@@ -192,6 +194,49 @@ def chat():
     else:
         sender = ""
 
+    summary = data.get("summary")
+    if isinstance(summary, str):
+        summary = summary.strip()
+    else:
+        summary = ""
+
+    latest_note_text_cache = None
+
+    def get_latest_note_text_for_context():
+        nonlocal latest_note_text_cache
+
+        if latest_note_text_cache is not None:
+            return latest_note_text_cache
+
+        latest_note_entry = get_latest_note()
+
+        if latest_note_entry is None:
+            latest_note_text_cache = ""
+        else:
+            latest_note_text_cache = extract_note_text(latest_note_entry).strip()
+
+        return latest_note_text_cache
+
+    def build_llm_context(latest_note_text=None):
+        resolved_latest_note = latest_note_text
+
+        if resolved_latest_note is None:
+            resolved_latest_note = get_latest_note_text_for_context()
+
+        return llm_service.build_context(
+            personality=PERSONALITY,
+            latest_note=resolved_latest_note,
+            click_count=memory.get("click_count", 0),
+            notification={
+                "source": event,
+                "sender": sender,
+                "summary": summary,
+            },
+        )
+
+    def has_llm_text(candidate):
+        return isinstance(candidate, str) and bool(candidate.strip())
+
     # Track usage
     if event == "click":
         memory["click_count"] += 1
@@ -220,7 +265,14 @@ def chat():
 
     elif event == "discord":
 
-        if sender:
+        notification_context = build_llm_context()
+        llm_notification_response = llm_service.generate_notification_response(
+            notification_context
+        )
+
+        if has_llm_text(llm_notification_response):
+            response = llm_notification_response.strip()
+        elif sender:
             response = random.choice(discord_sender_responses)
         else:
             response = random.choice(discord_responses)
@@ -237,25 +289,45 @@ def chat():
         else:
             latest_note = get_latest_note() if event == "click" else None
             latest_note_text = extract_note_text(latest_note).strip() if latest_note else ""
+            latest_note_text_cache = latest_note_text
 
             if (
                 event == "click"
                 and latest_note_text
                 and random.random() < 0.2
             ):
-                template = random.choice(CLICK_MEMORY_RESPONSES)
-                response = template.format(note=latest_note_text)
+                memory_context = build_llm_context(latest_note_text=latest_note_text)
+                llm_memory_response = llm_service.generate_memory_response(
+                    memory_context
+                )
+
+                if has_llm_text(llm_memory_response):
+                    response = llm_memory_response.strip()
+                else:
+                    template = random.choice(CLICK_MEMORY_RESPONSES)
+                    response = template.format(note=latest_note_text)
             else:
 
-                available_responses = [
-                    r for r in click_responses
-                    if r != memory["last_response"]
-                ]
+                click_context = build_llm_context(
+                    latest_note_text=latest_note_text or None
+                )
+                llm_click_response = llm_service.generate_click_response(
+                    click_context
+                )
 
-                if available_responses:
-                    response = random.choice(available_responses)
+                if has_llm_text(llm_click_response):
+                    response = llm_click_response.strip()
                 else:
-                    response = random.choice(click_responses)
+
+                    available_responses = [
+                        r for r in click_responses
+                        if r != memory["last_response"]
+                    ]
+
+                    if available_responses:
+                        response = random.choice(available_responses)
+                    else:
+                        response = random.choice(click_responses)
 
     memory["last_response"] = response
     save_memory(memory)
