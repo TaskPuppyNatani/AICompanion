@@ -15,6 +15,9 @@ from config import (
     STT_COMPUTE_TYPE,
     STT_BEAM_SIZE,
     STT_LANGUAGE,
+    TTS_LANG_CODE,
+    TTS_VOICE,
+    TTS_SAMPLE_RATE,
     NOTES_FILE,
     PERSONALITY_FILE,
     )
@@ -187,7 +190,7 @@ def save_memory(memory):
 
 print("Loading Kokoro...")
 
-pipeline = KPipeline(lang_code="a")
+pipeline = KPipeline(lang_code=TTS_LANG_CODE)
 
 print("Kokoro ready.")
 
@@ -497,7 +500,7 @@ def speak():
 
     generator = pipeline(
         text,
-        voice="af_heart"
+        voice=TTS_VOICE
     )
 
     audio_file = tempfile.NamedTemporaryFile(
@@ -509,7 +512,7 @@ def speak():
         sf.write(
             audio_file.name,
             audio,
-            24000
+            TTS_SAMPLE_RATE
         )
 
     return send_file(
