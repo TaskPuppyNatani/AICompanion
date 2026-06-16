@@ -14,6 +14,7 @@ from urllib.request import Request, urlopen
 from config import (
     OLLAMA_GENERATE_URL,
     OLLAMA_MODEL_NAME,
+    OLLAMA_REQUEST_TIMEOUT_SEC,
 )
 
 
@@ -77,7 +78,7 @@ class LLMService:
         )
 
         try:
-            with urlopen(request, timeout=30) as response:
+            with urlopen(request, timeout=OLLAMA_REQUEST_TIMEOUT_SEC) as response:
                 if getattr(response, "status", 200) >= 400:
                     return None
 
