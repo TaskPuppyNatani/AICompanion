@@ -308,12 +308,15 @@ def chat():
                     response = template.format(note=latest_note_text)
             else:
 
-                click_context = build_llm_context(
-                    latest_note_text=latest_note_text or None
-                )
-                llm_click_response = llm_service.generate_click_response(
-                    click_context
-                )
+                llm_click_response = None
+
+                if event == "click" and random.random() < 0.10:
+                    click_context = build_llm_context(
+                        latest_note_text=latest_note_text or None
+                    )
+                    llm_click_response = llm_service.generate_click_response(
+                        click_context
+                    )
 
                 if has_llm_text(llm_click_response):
                     response = llm_click_response.strip()

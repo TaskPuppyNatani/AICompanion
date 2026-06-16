@@ -7,7 +7,14 @@ now and returns no generated text.
 
 from __future__ import annotations
 
+import json
 from typing import Any
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+
+OLLAMA_GENERATE_URL = "http://192.168.1.4:11434/api/generate"
+OLLAMA_MODEL_NAME = "llama3.1:latest"
 
 
 class LLMService:
@@ -43,13 +50,80 @@ class LLMService:
             },
         }
 
-    def generate_click_response(self, context: dict[str, Any]) -> str | None:
-        """Future click-response generation hook.
+    def generate_ollama_response(self, prompt: str) -> str | None:
+        """Send a minimal prompt request to Ollama and return generated text.
 
-        Returns ``None`` until a local model backend is integrated.
+        This helper is intentionally not wired into existing response methods,
+        so current fallback behavior remains unchanged.
         """
-        _ = context
-        return None
+        if not isinstance(prompt, str) or not prompt.strip():
+            return None
+
+        payload = {
+            "model": OLLAMA_MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+        }
+
+        request = Request(
+            OLLAMA_GENERATE_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with urlopen(request, timeout=30) as response:
+                if getattr(response, "status", 200) >= 400:
+                    return None
+
+                response_data = response.read().decode("utf-8")
+
+            parsed = json.loads(response_data)
+        except (OSError, URLError, ValueError, TypeError):
+            return None
+
+        generated_text = parsed.get("response")
+
+        if not isinstance(generated_text, str):
+            return None
+
+        generated_text = generated_text.strip()
+        return generated_text or None
+
+    def generate_click_response(self, context: dict[str, Any]) -> str | None:
+        """Generate an experimental click response via Ollama."""
+        try:
+            personality = str(context.get("personality", "") or "").strip()
+            click_count = int(context.get("click_count", 0) or 0)
+            latest_note = str(context.get("latest_note", "") or "").strip()
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+        if latest_note:
+            latest_note_line = f"Latest note: {latest_note}"
+        else:
+            latest_note_line = "Latest note: none"
+
+        prompt = (
+            "You are Rivet, a friendly and playful AI companion.\n"
+            "Use the personality profile below to stay in character.\n\n"
+            "Personality profile:\n"
+            f"{personality or 'No personality profile provided.'}\n\n"
+            "Current click context:\n"
+            f"Click count: {click_count}\n"
+            f"{latest_note_line}\n\n"
+            "Response rules:\n"
+            "- Return exactly one sentence.\n"
+            "- Keep it concise.\n"
+            "- Stay in-character as Rivet.\n"
+            "- Keep tone friendly and playful.\n"
+            "- No roleplay formatting.\n"
+            "- No markdown.\n"
+            "Return only the response sentence."
+        )
+
+        return self.generate_ollama_response(prompt)
 
     def generate_memory_response(self, context: dict[str, Any]) -> str | None:
         """Future memory-aware response generation hook.
