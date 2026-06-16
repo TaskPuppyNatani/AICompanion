@@ -323,8 +323,12 @@ class Companion(QLabel):
         )
 
     def reload_personality(self):
-        print("Reload Personality selected (placeholder)")
-        notify("Reload Personality is not implemented yet.")
+        try:
+            api_client.reload_personality()
+            notify("Personality reloaded.")
+        except Exception as e:
+            print(f"Reload personality error: {e}")
+            notify("Failed to reload personality.")
 
     def mute_voice(self):
         print("Mute Voice selected (placeholder)")

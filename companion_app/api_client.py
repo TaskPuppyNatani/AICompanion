@@ -90,3 +90,10 @@ def transcribe_audio(audio_path):
         )
 
     return response.json()
+
+def reload_personality():
+    response = requests.post(
+        f"{BASE_URL}/reload_personality",
+        timeout=10
+    )
+    return response.json()

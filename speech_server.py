@@ -273,6 +273,17 @@ def note():
         "message": random.choice(NOTE_CONFIRMATIONS)
     }
 
+@app.route("/reload_personality", methods=["POST"])
+def reload_personality_endpoint():
+    global PERSONALITY
+
+    PERSONALITY = load_personality()
+
+    return jsonify({
+        "status": "ok",
+        "message": "Personality reloaded"
+    })
+
 @app.route("/notes/latest", methods=["GET"])
 def latest_note():
 
