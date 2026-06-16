@@ -19,3 +19,5 @@ OLLAMA_PORT = 11434
 OLLAMA_GENERATE_URL = (
     f"http://{OLLAMA_HOST}:{OLLAMA_PORT}/api/generate"
 )
+
+OLLAMA_MODEL_NAME = "phi4-mini:latest"

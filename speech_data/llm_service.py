@@ -11,11 +11,14 @@ import json
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
-from config import OLLAMA_GENERATE_URL
+from config import (
+    OLLAMA_GENERATE_URL,
+    OLLAMA_MODEL_NAME,
+)
 
 
 #OLLAMA_GENERATE_URL = "http://127.0.0.1:11434/api/generate"
-OLLAMA_MODEL_NAME = "phi4-mini:latest"
+#OLLAMA_MODEL_NAME = "phi4-mini:latest"
 
 
 class LLMService:
