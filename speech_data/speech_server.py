@@ -7,12 +7,17 @@ import json
 import threading
 from pathlib import Path
 from datetime import datetime
-from config import PERSONALITY_FILE
-from config import NOTES_FILE
 from config import (
     SPEECH_SERVER_HOST,
     SPEECH_SERVER_PORT,
-)
+    STT_MODEL_NAME,
+    STT_DEVICE,
+    STT_COMPUTE_TYPE,
+    STT_BEAM_SIZE,
+    STT_LANGUAGE,
+    NOTES_FILE,
+    PERSONALITY_FILE,
+    )
 
 from speech_data.notes_data import NOTE_CONFIRMATIONS, CATEGORY_KEYWORDS
 from speech_data.chat_data import (
@@ -38,7 +43,7 @@ MEMORY_FILE = Path("memory.json")
 
 #NOTES_FILE = Path(__file__).parent / "notes.json"
 
-STT_MODEL_NAME = "small.en"
+#STT_MODEL_NAME = "small.en"
 stt_model = None
 stt_model_lock = threading.Lock()
 
@@ -146,8 +151,8 @@ def get_stt_model():
             if stt_model is None:
                 stt_model = WhisperModel(
                     STT_MODEL_NAME,
-                    device="cpu",
-                    compute_type="int8"
+                    device=STT_DEVICE,
+                    compute_type=STT_COMPUTE_TYPE
                 )
 
     return stt_model
@@ -449,8 +454,8 @@ def transcribe_note_endpoint():
 
         segments, _ = model.transcribe(
             temp_audio_path,
-            beam_size=1,
-            language="en"
+            beam_size=STT_BEAM_SIZE,
+            language=STT_LANGUAGE
         )
 
         text = " ".join(
