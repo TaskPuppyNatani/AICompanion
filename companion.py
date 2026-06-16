@@ -3,12 +3,21 @@ import winsound
 import random
 import threading
 import time
-import tempfile
+from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtGui import QPixmap, QGuiApplication
+from PyQt6.QtGui import (
+    QPixmap,
+    QGuiApplication,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QColor,
+    QTextOption,
+)
 from PyQt6.QtWidgets import (
     QApplication,
+    QWidget,
     QLabel,
     QMenu,
     QInputDialog,
@@ -16,9 +25,10 @@ from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
-    QPushButton
+    QPushButton,
+    QTextEdit
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer, QSize, QRectF
 from companion_app.local_notify_server import (
     register_notify_callback,
     start_notification_server,
@@ -27,29 +37,14 @@ from companion_app.local_notify_server import (
 
 from config_store import config, saved_avatar_position, save_avatar_position
 from companion_app import api_client, note_workflow
+from companion_app import voice_capture
 
-try:
-    import numpy as np
-    import sounddevice as sd
-    import soundfile as sf_audio
-except Exception:
-    np = None
-    sd = None
-    sf_audio = None
-
-app = QApplication(sys.argv)
+app = None
+label = None
+notification_label = None
 
 
 speaking = False
-
-
-def set_avatar_position(new_x, new_y):
-    global x, y
-
-    x = int(new_x)
-    y = int(new_y)
-
-    label.move(x, y)
 
 
 class NotificationBridge(QObject):
@@ -57,6 +52,108 @@ class NotificationBridge(QObject):
 
 
 bridge = NotificationBridge()
+
+
+class ThoughtBubbleWidget(QWidget):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._text = ""
+        self._word_wrap = True
+        self._padding_x = 12
+        self._padding_y = 10
+        self._tail_height = 26
+        self._corner_radius = 18
+        self._border_width = 2
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def setText(self, text):
+        self._text = "" if text is None else str(text)
+        self.updateGeometry()
+        self.update()
+
+    def text(self):
+        return self._text
+
+    def setWordWrap(self, enabled):
+        self._word_wrap = bool(enabled)
+        self.updateGeometry()
+        self.update()
+
+    def _effective_max_width(self):
+        max_width = self.maximumWidth()
+
+        if max_width >= 16777215:
+            return 250
+
+        return max(120, max_width)
+
+    def _text_bounds(self):
+        max_width = self._effective_max_width() - (self._padding_x * 2 + 4)
+        max_width = max(40, max_width)
+        flags = int(Qt.TextFlag.TextWordWrap) if self._word_wrap else 0
+        return self.fontMetrics().boundingRect(0, 0, max_width, 10000, flags, self._text)
+
+    def sizeHint(self):
+        text_rect = self._text_bounds()
+        width = text_rect.width() + (self._padding_x * 2 + 4)
+        height = text_rect.height() + (self._padding_y * 2 + 4) + self._tail_height
+
+        effective_max = self._effective_max_width()
+        width = min(width, effective_max)
+
+        return QSize(width, height)
+
+    def minimumSizeHint(self):
+        return self.sizeHint()
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+
+        body_rect = QRectF(
+            1,
+            1,
+            max(10, self.width() - 2),
+            max(10, self.height() - self._tail_height - 2),
+        )
+
+        path = QPainterPath()
+        path.addRoundedRect(body_rect, self._corner_radius, self._corner_radius)
+
+        outline_pen = QPen(QColor("black"), self._border_width)
+        painter.setPen(outline_pen)
+        painter.setBrush(QColor("white"))
+        painter.drawPath(path)
+
+        # Thought circles trailing from bubble toward Rivet.
+        circle_specs = [
+            (7.0, body_rect.left() + 44, body_rect.bottom() + 9),
+            (5.0, body_rect.left() + 30, body_rect.bottom() + 17),
+            (3.5, body_rect.left() + 18, body_rect.bottom() + 23),
+        ]
+
+        for radius, cx, cy in circle_specs:
+            painter.drawEllipse(QRectF(cx - radius, cy - radius, radius * 2, radius * 2))
+
+        text_rect = body_rect.adjusted(
+            self._padding_x,
+            self._padding_y,
+            -self._padding_x,
+            -self._padding_y,
+        )
+
+        text_option = QTextOption(Qt.AlignmentFlag.AlignCenter)
+        if self._word_wrap:
+            text_option.setWrapMode(QTextOption.WrapMode.WordWrap)
+        else:
+            text_option.setWrapMode(QTextOption.WrapMode.NoWrap)
+
+        painter.setPen(QColor("black"))
+        painter.drawText(text_rect, self._text, text_option)
 
 responses = [
     "Hello Pup.",
@@ -123,13 +220,18 @@ def notify(message):
     notification_label.setText(message)
     notification_label.adjustSize()
 
-    bubble_x = x + 60
-    bubble_y = y - notification_label.height() - 10
+    if label is not None:
+        label.update_notification_bubble_position()
+    else:
+        avatar_x, avatar_y = 0, 0
 
-    notification_label.move(
-        bubble_x,
-        bubble_y
-    )
+        bubble_x = avatar_x + 60
+        bubble_y = avatar_y - notification_label.height() - 10
+
+        notification_label.move(
+            bubble_x,
+            bubble_y
+        )
 
     notification_label.show()
 
@@ -145,11 +247,7 @@ def notify(message):
     )
 
 
-bridge.notify_signal.connect(notify)
-
-
 is_shutting_down = False
-register_notify_callback(bridge.notify_signal.emit)
 
 
 def clean_exit():
@@ -165,7 +263,8 @@ def clean_exit():
 
     stop_notification_server(timeout=3)
 
-    app.quit()
+    if app is not None:
+        app.quit()
 
 class Companion(QLabel):
 
@@ -176,6 +275,8 @@ class Companion(QLabel):
         self.drag_offset = None
         self.dragged = False
         self.transcribing_dialog = None
+        self.avatar_x = 0
+        self.avatar_y = 0
         self.context_menu = QMenu(self)
 
         exit_action = self.context_menu.addAction("Exit")
@@ -190,8 +291,36 @@ class Companion(QLabel):
         add_note_action = self.context_menu.addAction("Add Note")
         add_note_action.triggered.connect(self.add_note_dialog)
 
+        view_notes_action = self.context_menu.addAction("View Notes")
+        view_notes_action.triggered.connect(self.view_notes_dialog)
+
         voice_note_action = self.context_menu.addAction("Voice Note")
         voice_note_action.triggered.connect(self.voice_note_dialog)
+
+    def set_avatar_position(self, new_x, new_y):
+        self.avatar_x = int(new_x)
+        self.avatar_y = int(new_y)
+        self.move(self.avatar_x, self.avatar_y)
+
+        if notification_label is not None and notification_label.isVisible():
+            self.update_notification_bubble_position()
+
+    def get_avatar_position(self):
+        return self.avatar_x, self.avatar_y
+
+    def update_notification_bubble_position(self):
+        if notification_label is None:
+            return
+
+        avatar_x, avatar_y = self.get_avatar_position()
+
+        bubble_x = avatar_x + 60
+        bubble_y = avatar_y - notification_label.height() - 10
+
+        notification_label.move(
+            bubble_x,
+            bubble_y
+        )
 
     def reload_personality(self):
         print("Reload Personality selected (placeholder)")
@@ -217,6 +346,71 @@ class Companion(QLabel):
             return
 
         self.finalize_note_workflow(note_text)
+
+    def view_notes_dialog(self):
+        try:
+            recent_notes = api_client.get_recent_notes()
+        except Exception as e:
+            print(f"View notes error: {e}")
+            notify("Could not load notes.")
+            return
+
+        notes_dialog = QDialog(self)
+        notes_dialog.setWindowTitle("Recent Notes")
+        notes_dialog.setModal(True)
+
+        layout = QVBoxLayout(notes_dialog)
+        notes_text = QTextEdit(notes_dialog)
+        notes_text.setReadOnly(True)
+
+        if not isinstance(recent_notes, list) or not recent_notes:
+            notes_text.setPlainText("No recent notes.")
+        else:
+            entries = []
+
+            for note_entry in recent_notes:
+                if isinstance(note_entry, dict):
+                    category = note_entry.get("category", "No category")
+                    note_text_value = note_entry.get("note", "")
+                    timestamp = self.format_note_timestamp_for_display(
+                        note_entry.get("timestamp")
+                    )
+                else:
+                    category = "No category"
+                    note_text_value = note_entry
+                    timestamp = "No timestamp"
+
+                if not isinstance(category, str) or not category.strip():
+                    category = "No category"
+
+                if not isinstance(note_text_value, str):
+                    note_text_value = str(note_text_value)
+
+                entries.append(
+                    "\n".join([
+                        f"Category: {category}",
+                        f"Note: {note_text_value}",
+                        f"Timestamp: {timestamp}",
+                    ])
+                )
+
+            notes_text.setPlainText("\n\n---\n\n".join(entries))
+
+        layout.addWidget(notes_text)
+        notes_dialog.resize(520, 360)
+        notes_dialog.exec()
+
+    def format_note_timestamp_for_display(self, timestamp):
+        if not isinstance(timestamp, str) or not timestamp.strip():
+            return "No timestamp"
+
+        raw_timestamp = timestamp.strip()
+
+        try:
+            parsed_timestamp = datetime.fromisoformat(raw_timestamp)
+            return parsed_timestamp.strftime("%Y-%m-%d %H:%M")
+        except ValueError:
+            return raw_timestamp
 
     def pick_note_category(self, note_text):
         category = None
@@ -311,18 +505,14 @@ class Companion(QLabel):
             self.transcribing_dialog = None
 
     def voice_note_dialog(self):
-        if np is None or sd is None or sf_audio is None:
+        if not voice_capture.audio_dependencies_available():
             notify("Voice Note requires sounddevice, soundfile, and numpy.")
             return
 
         sample_rate = 16000
         audio_frames = []
         recording_state = {"stopped": False}
-
-        def audio_callback(indata, frames, callback_time, status):
-            if status:
-                print(f"Recording status: {status}")
-            audio_frames.append(indata.copy())
+        audio_callback = voice_capture.build_audio_callback(audio_frames)
 
         record_dialog = QDialog(self)
         record_dialog.setWindowTitle("Voice Note")
@@ -348,25 +538,14 @@ class Companion(QLabel):
         stream = None
 
         try:
-            stream = sd.InputStream(
-                samplerate=sample_rate,
-                channels=1,
-                dtype="float32",
-                callback=audio_callback
-            )
-            stream.start()
+            stream = voice_capture.start_input_stream(sample_rate, audio_callback)
             record_dialog.exec()
         except Exception as e:
             print(f"Voice recording error: {e}")
             notify("Could not start voice recording.")
             return
         finally:
-            if stream is not None:
-                try:
-                    stream.stop()
-                    stream.close()
-                except Exception as close_error:
-                    print(f"Voice stream close error: {close_error}")
+            voice_capture.stop_and_close_stream(stream)
 
         if not recording_state["stopped"]:
             return
@@ -379,16 +558,10 @@ class Companion(QLabel):
         transcript_text = ""
 
         try:
-            waveform = np.concatenate(audio_frames, axis=0)
-
-            temp_audio = tempfile.NamedTemporaryFile(
-                suffix=".wav",
-                delete=False
+            temp_audio_path = voice_capture.create_temp_wav_from_frames(
+                audio_frames,
+                sample_rate
             )
-            temp_audio_path = temp_audio.name
-            temp_audio.close()
-
-            sf_audio.write(temp_audio_path, waveform, sample_rate)
 
             # Ensure no stale status dialog remains before showing a new one.
             self.clear_transcribing_dialog()
@@ -411,12 +584,7 @@ class Companion(QLabel):
             return
         finally:
             self.clear_transcribing_dialog()
-
-            if temp_audio_path:
-                try:
-                    Path(temp_audio_path).unlink()
-                except OSError:
-                    pass
+            voice_capture.cleanup_temp_audio_file(temp_audio_path)
 
         if not transcript_text:
             notify("No speech detected.")
@@ -481,7 +649,7 @@ class Companion(QLabel):
             return
 
         new_position = event.globalPosition().toPoint() - self.drag_offset
-        set_avatar_position(new_position.x(), new_position.y())
+        self.set_avatar_position(new_position.x(), new_position.y())
         self.dragged = True
         event.accept()
 
@@ -491,92 +659,128 @@ class Companion(QLabel):
             return
 
         if self.dragged:
-            save_avatar_position(x, y)
+            avatar_x, avatar_y = self.get_avatar_position()
+            save_avatar_position(avatar_x, avatar_y)
 
         self.drag_offset = None
         self.dragged = False
         event.accept()
-label = Companion()
 
-notification_label = QLabel("")
 
-notification_label.setStyleSheet("""
-    background-color: white;
-    border: 2px solid black;
-    border-radius: 20px;
-    padding: 10px;
-""")
-        
-notification_label.setWordWrap(True)
-notification_label.setMaximumWidth(250)
+class CompanionApplication:
 
-notification_label.setWindowFlags(
-    Qt.WindowType.FramelessWindowHint
-    | Qt.WindowType.WindowStaysOnTopHint
-    | Qt.WindowType.Tool
-)
+    def __init__(self):
+        global app
 
-notification_label.setAttribute(
-    Qt.WidgetAttribute.WA_ShowWithoutActivating
-)
+        app = QApplication(sys.argv)
+        self.app = app
 
-notification_label.hide()
+        self._wire_notification_callbacks()
+        self._setup_companion_widget()
+        self._setup_notification_label()
+        self._setup_avatar()
+        self._setup_startup_notifications()
+        self._setup_notification_server()
+        self._setup_shutdown_wiring()
 
-IMAGE_PATH = Path(__file__).parent / config["avatar"]
+    def _wire_notification_callbacks(self):
+        bridge.notify_signal.connect(notify)
+        register_notify_callback(bridge.notify_signal.emit)
 
-pixmap = QPixmap(str(IMAGE_PATH))
+    def _setup_companion_widget(self):
+        global label
+        label = Companion()
 
-pixmap = pixmap.scaled(
-    config["avatar_size"],
-    config["avatar_size"],
-    Qt.AspectRatioMode.KeepAspectRatio,
-    Qt.TransformationMode.SmoothTransformation
-)
+    def _setup_notification_label(self):
+        global notification_label
 
-label.setPixmap(pixmap)
+        notification_label = ThoughtBubbleWidget()
 
-screen = QGuiApplication.primaryScreen()
-geometry = screen.availableGeometry()
+        notification_label.setWordWrap(True)
+        notification_label.setMaximumWidth(250)
 
-x = geometry.width() - pixmap.width() - 20
-y = geometry.height() - pixmap.height() - 20
+        notification_label.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
 
-saved_position = saved_avatar_position()
+        notification_label.setAttribute(
+            Qt.WidgetAttribute.WA_ShowWithoutActivating
+        )
 
-if saved_position is not None:
-    x, y = saved_position
+        notification_label.hide()
 
-label.move(x, y)
+    def _setup_avatar(self):
+        image_path = Path(__file__).parent / config["avatar"]
 
-label.setWindowFlags(
-    Qt.WindowType.FramelessWindowHint
-    | Qt.WindowType.WindowStaysOnTopHint
-    | Qt.WindowType.Tool
-)
+        pixmap = QPixmap(str(image_path))
 
-label.setAttribute(
-    Qt.WidgetAttribute.WA_TranslucentBackground
-)
+        pixmap = pixmap.scaled(
+            config["avatar_size"],
+            config["avatar_size"],
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
 
-label.show()
+        label.setPixmap(pixmap)
 
-startup_phrase = ask_ratchet("startup")
+        screen = QGuiApplication.primaryScreen()
+        geometry = screen.availableGeometry()
 
-notify(startup_phrase)
+        initial_x = geometry.width() - pixmap.width() - 20
+        initial_y = geometry.height() - pixmap.height() - 20
 
-print(startup_phrase)
+        saved_position = saved_avatar_position()
 
-QTimer.singleShot(
-    10000,
-    lambda: notify(random.choice(notifications))
-)
+        if saved_position is not None:
+            initial_x, initial_y = saved_position
 
-start_notification_server(
-    host="127.0.0.1",
-    port=5000,
-    chat_resolver=ask_ratchet
-)
+        label.set_avatar_position(initial_x, initial_y)
 
-app.aboutToQuit.connect(clean_exit)
+        label.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint
+            | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.Tool
+        )
 
-sys.exit(app.exec())
+        label.setAttribute(
+            Qt.WidgetAttribute.WA_TranslucentBackground
+        )
+
+        label.show()
+
+    def _setup_startup_notifications(self):
+        startup_phrase = ask_ratchet("startup")
+
+        notify(startup_phrase)
+
+        print(startup_phrase)
+
+        QTimer.singleShot(
+            10000,
+            lambda: notify(random.choice(notifications))
+        )
+
+    def _setup_notification_server(self):
+        start_notification_server(
+            host="127.0.0.1",
+            port=5000,
+            chat_resolver=ask_ratchet
+        )
+
+    def _setup_shutdown_wiring(self):
+        self.app.aboutToQuit.connect(clean_exit)
+
+    def run(self):
+        return self.app.exec()
+
+
+def main():
+    companion_application = CompanionApplication()
+    return_code = companion_application.run()
+    sys.exit(return_code)
+
+
+if __name__ == "__main__":
+    main()

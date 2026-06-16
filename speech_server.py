@@ -11,6 +11,7 @@ from datetime import datetime
 from speech_data.notes_data import NOTE_CONFIRMATIONS, CATEGORY_KEYWORDS
 from speech_data.chat_data import (
     CLICK_RESPONSES,
+    CLICK_MILESTONES,
     STARTUP_RESPONSES,
     DISCORD_RESPONSES,
     DISCORD_SENDER_RESPONSES,
@@ -224,15 +225,13 @@ def chat():
             response = random.choice(discord_responses)
 
     else:
+        milestone_response = None
 
-        if memory["click_count"] == 1:
-            response = "Nice to see you today, Pup."
+        if event == "click":
+            milestone_response = CLICK_MILESTONES.get(memory["click_count"])
 
-        elif memory["click_count"] == 10:
-            response = "You've been checking on me a lot today."
-
-        elif memory["click_count"] == 25:
-            response = "I appreciate all the attention."
+        if milestone_response is not None:
+            response = milestone_response
 
         else:
 
