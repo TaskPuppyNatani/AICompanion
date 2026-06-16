@@ -1,6 +1,6 @@
 import requests
 
-BASE_URL = "http://192.168.1.4:5001"
+from config import BASE_URL
 
 
 def chat(event, sender=None):
