@@ -1,7 +1,8 @@
 import requests
+from config import NOTIFY_ENDPOINT_URL
 
 requests.post(
-    "http://127.0.0.1:5000/notify",
+    NOTIFY_ENDPOINT_URL,
     json={
         "message": "HEY PUP CHECK YO DAMN MESSAGES GIRLY"
     }

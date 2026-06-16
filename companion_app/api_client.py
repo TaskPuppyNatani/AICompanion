@@ -1,6 +1,14 @@
 import requests
 
-from config import BASE_URL
+from config import (
+    BASE_URL,
+    API_TIMEOUT_CHAT_SEC,
+    API_TIMEOUT_SPEAK_SEC,
+    API_TIMEOUT_NOTE_SEC,
+    API_TIMEOUT_SUGGEST_SEC,
+    API_TIMEOUT_TRANSCRIBE_SEC,
+    API_TIMEOUT_RELOAD_SEC,
+)
 
 
 def chat(event, sender=None):
@@ -14,7 +22,7 @@ def chat(event, sender=None):
     response = requests.post(
         f"{BASE_URL}/chat",
         json=payload,
-        timeout=10
+        timeout=API_TIMEOUT_CHAT_SEC
     )
     return response.json()
 
@@ -23,7 +31,7 @@ def speak(text):
     response = requests.post(
         f"{BASE_URL}/speak",
         json={"text": text},
-        timeout=30
+        timeout=API_TIMEOUT_SPEAK_SEC
     )
     return response.content
 
@@ -39,7 +47,7 @@ def save_note(note, category=None):
     response = requests.post(
         f"{BASE_URL}/note",
         json=payload,
-        timeout=10
+        timeout=API_TIMEOUT_NOTE_SEC
     )
     return response.json()
 
@@ -70,7 +78,7 @@ def suggest_category(note_text):
     response = requests.get(
         f"{BASE_URL}/notes/suggest-category",
         params={"q": note_text},
-        timeout=10
+        timeout=API_TIMEOUT_SUGGEST_SEC
     )
     return response.json()
 
@@ -86,7 +94,7 @@ def transcribe_audio(audio_path):
                     "audio/wav"
                 )
             },
-            timeout=120
+            timeout=API_TIMEOUT_TRANSCRIBE_SEC
         )
 
     return response.json()
@@ -94,6 +102,6 @@ def transcribe_audio(audio_path):
 def reload_personality():
     response = requests.post(
         f"{BASE_URL}/reload_personality",
-        timeout=10
+        timeout=API_TIMEOUT_RELOAD_SEC
     )
     return response.json()
