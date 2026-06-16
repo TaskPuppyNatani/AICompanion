@@ -1,6 +1,11 @@
 import threading
 from flask import Flask, request
 from werkzeug.serving import make_server
+from config import (
+    NOTIFY_SERVER_HOST,
+    NOTIFY_SERVER_PORT,
+)
+
 
 from companion_app.integrations.discord import (
     discord_notification_event_from_payload,
@@ -42,7 +47,7 @@ def register_notify_callback(callback):
         _notify_callback = callback
 
 
-def start_notification_server(host="127.0.0.1", port=5000, chat_resolver=None):
+def start_notification_server(host=NOTIFY_SERVER_HOST, port=NOTIFY_SERVER_PORT, chat_resolver=None):
     global _server_thread, _chat_resolver
 
     with _state_lock:

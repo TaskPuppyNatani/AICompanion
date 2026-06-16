@@ -5,6 +5,11 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from config import (
+    NOTIFY_SERVER_HOST,
+    NOTIFY_SERVER_PORT,
+)
+
 
 from PyQt6.QtGui import (
     QPixmap,
@@ -35,6 +40,7 @@ from companion_app.local_notify_server import (
     stop_notification_server,
 )
 
+from config import NOTIFY_SERVER_HOST
 from config_store import (
     config,
     saved_avatar_position,
@@ -782,8 +788,8 @@ class CompanionApplication:
 
     def _setup_notification_server(self):
         start_notification_server(
-            host="127.0.0.1",
-            port=5000,
+            host=NOTIFY_SERVER_HOST,
+            port=NOTIFY_SERVER_PORT,
             chat_resolver=ask_ratchet
         )
 
