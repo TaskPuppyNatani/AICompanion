@@ -1,0 +1,238 @@
+"""
+QUICK START: Windows Notification Listener POC
+===============================================
+
+This file explains how to run the test scripts immediately.
+
+
+STEP 1: INSTALL WINSDK
+======================
+
+From command line (PowerShell or CMD):
+
+  pip install winsdk
+
+Expected output:
+  Successfully installed winsdk-x.x.x
+
+Or if you're using a virtual environment:
+  .venv\Scripts\pip.exe install winsdk
+
+Verify installation:
+  python -c "from winsdk.windows.ui.notifications.management import UserNotificationListener; print('OK')"
+
+Should print: OK
+
+
+STEP 2: RUN THE BASIC TEST
+===========================
+
+From the AICompanion directory:
+
+  python test_windows_notifications.py
+
+Expected output:
+  [✓] winsdk imported successfully
+  [✓] UserNotificationListener.get_current() succeeded
+  [✓] Notification listener registered
+  
+  Listening for notifications...
+  Press Ctrl+C to exit
+
+Then trigger notifications and watch for output.
+
+
+STEP 3: TEST WITH DISCORD
+==========================
+
+While test script is running:
+
+1. Open Discord
+2. In another Discord window or ask someone to send you a message
+3. Watch for the desktop notification (should appear bottom-right)
+4. Check the Python console for output
+
+Expected output from console:
+
+  ======================================================================
+  [2026-06-16T14:30:45.123456]
+  App:    Discord
+  Title:  Alice
+  Body:   Hey, did you see the news?
+  ======================================================================
+
+
+STEP 4: TEST WITH TELEGRAM
+===========================
+
+While test script is running:
+
+1. Open Telegram
+2. Have someone send you a message (or send to yourself from another device)
+3. Watch for desktop notification (bottom-right)
+4. Check console
+
+Expected output:
+
+  ======================================================================
+  [2026-06-16T14:31:12.654321]
+  App:    Telegram
+  Title:  Bob
+  Body:   Check this out!
+  ======================================================================
+
+
+STEP 5: TEST WITH EMAIL
+=======================
+
+While test script is running:
+
+1. Open Outlook or Gmail in a browser
+2. Request a test email or trigger notification
+3. Watch for notification
+4. Check console
+
+Expected output:
+
+  ======================================================================
+  [2026-06-16T14:32:00.000000]
+  App:    Outlook
+  Title:  Subject: Important Meeting
+  Body:   
+  ======================================================================
+
+(Note: Email notifications are often minimal)
+
+
+STEP 6: TRY THE ASYNC VERSION (IF NEEDED)
+==========================================
+
+If the basic version has issues or doesn't work:
+
+  python test_windows_notifications_async.py
+
+This version has better error handling and may work better on some systems.
+
+
+TROUBLESHOOTING
+===============
+
+ERROR: "Failed to import winsdk: No module named 'winsdk'"
+FIX: Run: pip install winsdk
+
+ERROR: "Failed to get listener: [WinError -2147418105] ..."
+FIX: This usually means:
+  - You're on Windows < 10 (need Windows 10+)
+  - Notifications are disabled globally
+  Try: Settings > Privacy & security > Notifications > Make sure it's ON
+
+ERROR: "No output even with notifications enabled"
+FIX: 
+  - Notifications must appear as VISIBLE TOASTS (bottom-right corner)
+  - If app has notifications muted, they won't show as toasts
+  - Check: Settings > Notifications & actions > App notifications
+  - Make sure Discord/Telegram/Outlook have notifications ON
+
+ERROR: "Script exits immediately with no error"
+FIX: Check your Python version
+  python --version
+  (Need 3.8+; if older, upgrade Python)
+
+PERMISSION ISSUE: Script runs but gets no notifications
+FIX:
+  - Settings > Privacy & security > App permissions > Notifications
+  - Make sure Discord, Telegram, and Outlook are toggled ON
+  - Each app needs explicit permission granted
+
+
+WHAT FIELDS ARE CAPTURED?
+==========================
+
+From the output, you should see:
+
+Timestamp:  [ISO format date/time]
+App:        [Application name - Discord, Telegram, Outlook, etc.]
+Title:      [Usually sender name or subject]
+Body:       [Message preview - may be truncated]
+
+Debug section shows all available fields from the notification object.
+
+
+SUCCESSFUL TEST INDICATORS
+============================
+
+✓ Test script starts without errors
+✓ Outputs "[✓] Notification listener registered"
+✓ When you trigger a Discord notification, output appears with:
+    - App: Discord
+    - Title: [Sender name]
+    - Body: [Message text]
+✓ When you trigger a Telegram notification, similar output appears
+✓ When you trigger an email notification, output appears (may be minimal)
+✓ All timestamps are accurate
+✓ Script can run for 1+ hour without crashes or memory growth
+
+
+NEXT: READ THE FULL GUIDE
+==========================
+
+For comprehensive findings, risks, and detailed analysis:
+
+  Open: test_windows_notifications_GUIDE.py
+  Open: TEST_POC_SUMMARY.txt
+
+These contain:
+  - Expected output examples
+  - Windows permission model explained
+  - Risks and mitigations
+  - Discord/Telegram/Email accessibility details
+  - Platform requirements
+  - Phase 2 integration plan
+
+
+QUESTIONS?
+==========
+
+Q: Can I run this on Linux/Mac?
+A: No, this POC is Windows-only. Future phases will add Linux (DBUS) and macOS (PyObjC).
+
+Q: Do I need admin privileges?
+A: No, regular user account works.
+
+Q: Will this capture all notifications?
+A: Only notifications that appear as visible toasts (not muted/hidden).
+
+Q: Can I use this with Rivet right now?
+A: No, this is POC only. Phase 2 will integrate with Rivet's notification system.
+
+Q: What if notifications don't appear?
+A: Likely Settings issue. Check:
+   - Settings > Notifications & actions > ON for each app
+   - Settings > Focus assist (don't disturb) - might be blocking toasts
+   - Restart the test script
+
+Q: What's the difference between test scripts?
+A:
+  test_windows_notifications.py        = Basic, synchronous
+  test_windows_notifications_async.py  = Advanced, with async event loop
+  
+  Try basic first. If issues, try async version.
+
+Q: Can these scripts interfere with Rivet?
+A: No, they're completely standalone. Safe to run while Rivet is also running.
+
+
+RUNNING BOTH SIMULTANEOUSLY
+============================
+
+You can run the test script while Rivet is running.
+This will help validate that the architecture works end-to-end once integrated.
+
+Future Phase 2:
+  1. The test script architecture will be copied into Rivet
+  2. Instead of printing, will POST to http://127.0.0.1:5000/notify
+  3. Rivet will display and speak notifications
+
+For now, test script and Rivet can coexist peacefully.
+
+"""

@@ -1,0 +1,155 @@
+PHASE 6A POLLING-BASED WINDOWS NOTIFICATION LISTENER
+====================================================
+
+ARCHITECTURE SUMMARY
+====================
+
+Core Design:
+  Background thread runs polling loop every 1000ms
+  Each poll: get_notifications_async() → compare IDs → detect new
+  New notifications → convert to payload → emit via notify_signal
+
+Components:
+
+  NotificationPoller (new class)
+  ├─ Polling thread (background, non-blocking)
+  ├─ seen_notification_ids: set[int] (memory tracking)
+  ├─ Callback on new notifications
+  └─ Start/stop lifecycle management
+
+  WindowsNotificationAdapter (new class)
+  ├─ windows_notification → /notify payload conversion
+  ├─ App detection (discord/telegram/email)
+  ├─ Content extraction
+  └─ Reusable for both polling and future event subscriptions
+
+  Integration in companion.py
+  ├─ _ensure_notification_listener_ready() (new method)
+  ├─ Start poller on init
+  ├─ Stop poller on shutdown
+  └─ Route callback to existing notify_signal
+
+═══════════════════════════════════════════════════════════
+
+POLLING INTERVAL: 1000ms (configurable)
+  Why: Good balance of responsiveness vs CPU
+  CPU impact: ~1-2% per thread
+  Latency: ~0-1000ms until detection (acceptable)
+  
+═══════════════════════════════════════════════════════════
+
+DEDUPLICATION STRATEGY
+  
+  Data: Set of notification IDs (uint32 only, not full objects)
+  
+  Algorithm:
+    1. Poll get_notifications() → get current_ids
+    2. new_ids = current_ids - seen_ids
+    3. For each new_id: fetch and process notification
+    4. seen_ids += current_ids
+    5. If len(seen_ids) > 1000: trim oldest 100
+  
+  Memory: ~4KB for 1000 tracked IDs
+  
+  Startup behavior:
+    First poll: Cache all existing notifications (no processing)
+    Later polls: Only process new notifications
+    Result: No spam of old notifications on startup
+
+═══════════════════════════════════════════════════════════
+
+PAYLOAD COMPATIBILITY
+  
+  Windows notification → /notify endpoint format:
+  
+  {
+      "source": "discord" | "telegram" | "email" | "system",
+      "sender": "extracted from app/notification",
+      "summary": "notification title/body"
+  }
+  
+  Source detection:
+    • Parse app_info.id or app_info.display_name
+    • Match against "discord", "telegram", "outlook|mail|gmail"
+    • Fall back to "system"
+  
+  Content extraction:
+    • notification.notification is XML
+    • Parse to extract title + body
+    • Concatenate as summary
+    • Fall back to "Notification received" if parsing fails
+
+═══════════════════════════════════════════════════════════
+
+RISKS
+═════
+
+CRITICAL RISKS:
+  None identified
+
+MODERATE RISKS:
+
+  1. Notification dismissed before poll detects it
+     Impact: Notification never processed
+     Mitigation: Accept as feature (user dismissed it intentionally)
+                 Current HTTP /notify also doesn't guarantee delivery
+                 "Best effort" is acceptable for companion
+  
+  2. Polling introduces 0-1000ms latency vs instant events
+     Impact: Users perceive ~1s delay vs event-driven
+     Mitigation: 1000ms acceptable for notifications (matches email, chat)
+                 Can reduce to 500ms if UX requires (<2% CPU)
+
+LOW RISKS:
+
+  1. get_notification(id) returns None if user dismissed
+     Impact: Process None → error → skip notification
+     Mitigation: Add None check, log warning, continue
+  
+  2. Memory growth from seen_ids
+     Impact: Unbounded growth if trimming fails
+     Mitigation: Trim policy (1000 max, remove 100 when exceeded)
+  
+  3. Notification ID wraparound (uint32)
+     Impact: Potential ID reuse after 4.2 billion
+     Mitigation: Trimming keeps only recent IDs (impossible in practice)
+
+═══════════════════════════════════════════════════════════
+
+IMPLEMENTATION PLAN
+═══════════════════
+
+Module: companion_app/windows_notification_listener.py (NEW)
+
+  6A.1 - NotificationPoller class            3-4 hours
+  6A.2 - Payload conversion logic            2-3 hours
+  6A.3 - Integration with companion.py       2-3 hours
+  6A.4 - Configuration/tuning                1-2 hours
+  6A.5 - Testing edge cases                  3-4 hours
+  ─────────────────────────────────────────────────
+  TOTAL: 11-16 hours
+
+Startup sequence:
+  1. companion.py.__init__() calls _ensure_notification_listener_ready()
+  2. _ensure_notification_listener_ready():
+     a. Create NotificationPoller with notify_signal.emit callback
+     b. poller.start() → returns immediately (thread runs background)
+     c. First poll silently caches existing notifications
+  3. cleanup:
+     a. companion.py.clean_exit() calls poller.stop()
+     b. Wait for thread to finish (~1 second max)
+
+═══════════════════════════════════════════════════════════
+
+KEY DECISIONS
+═════════════
+
+✓ Polling (not events)         - Required due to UI thread limitation
+✓ 1000ms interval              - Good balance, configurable
+✓ Track IDs only               - Minimal memory footprint
+✓ Silent prime on startup      - Avoid old notification spam
+✓ Existing payload format      - Zero changes to /notify endpoint
+✓ Background thread            - Non-blocking to companion
+✓ Graceful degradation         - If poller fails, companion still works
+
+═══════════════════════════════════════════════════════════

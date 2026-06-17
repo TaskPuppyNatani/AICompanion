@@ -1,0 +1,288 @@
+"""
+WINDOWS NOTIFICATION POC - API DIAGNOSIS & FIX
+===============================================
+
+Date: 2026-06-16
+Environment: E:\AICompanion\.venv
+Python: 3.12+ (in venv)
+winsdk Version: 1.0.0b10 (beta 10)
+
+
+ROOT CAUSE ANALYSIS
+===================
+
+ERROR MESSAGE:
+  AttributeError:
+  type object '_winsdk_Windows_UI_Notifications_Management.UserNotificationListener'
+  has no attribute 'get_current'
+
+ROOT CAUSE:
+  The POC code uses the wrong API pattern.
+  
+  INCORRECT (current POC code):
+    listener = UserNotificationListener.get_current()
+    
+  CORRECT (winsdk 1.0.0b10):
+    listener = UserNotificationListener.current
+
+WINSDK VERSION IMPACT:
+  winsdk 1.0.0b10 (beta 10) was a redesign from earlier versions.
+  
+  - Old API (hypothetical earlier versions):
+    UserNotificationListener.get_current()  ← method call
+    
+  - New API (1.0.0b10+):
+    UserNotificationListener.current        ← class property
+    
+  The change reflects WinRT's actual API pattern more accurately.
+  UserNotificationListener.current is the official Windows Runtime property.
+
+EVIDENCE:
+  From: E:\AICompanion\.venv\Lib\site-packages\winsdk\windows\ui\notifications\management\__init__.pyi
+  Line 22:
+    current: typing.ClassVar[typing.Optional[UserNotificationListener]]
+  
+  This is a class variable (property), not a callable method.
+
+
+WHY THE POC FAILED
+==================
+
+Step 1: POC imported successfully
+  from winsdk.windows.ui.notifications.management import UserNotificationListener
+  ✓ Import works
+
+Step 2: POC attempted to call get_current()
+  listener = UserNotificationListener.get_current()
+  
+  Python searched for 'get_current' method/attribute on UserNotificationListener
+  
+  Available methods on UserNotificationListener:
+    - add_notification_changed
+    - clear_notifications
+    - get_access_status
+    - get_notification
+    - get_notifications_async
+    - remove_notification
+    - remove_notification_changed
+    - request_access_async
+    
+  'get_current' is NOT in this list.
+  
+  Result: AttributeError
+
+Step 3: What SHOULD have happened
+  listener = UserNotificationListener.current
+  ✓ 'current' exists as a class property
+  ✓ Returns a UserNotificationListener instance
+  ✓ Success
+
+
+WHY DOCUMENTATION WAS WRONG
+===========================
+
+Possibility 1: Old Documentation
+  - The examples online may reference pre-1.0.0b10 winsdk
+  - API was significantly refactored in beta 10
+  - Old docs not yet updated or removed
+
+Possibility 2: Different Language Documentation
+  - Windows Runtime (WinRT) API is available in C#, C++, TypeScript, etc.
+  - Different languages may have different access patterns
+  - Python winsdk.current (property) vs. C# .Current (property)
+  - Someone may have incorrectly assumed a method call pattern
+
+Possibility 3: Confusion with pywin32
+  - pywin32 (older COM interop library) has different API pattern
+  - May have been confused with that library
+  - pywin32 would use methods, not properties
+
+Reality:
+  The official WinRT API uses a class property called 'current'.
+  The winsdk Python bindings correctly implement this as UserNotificationListener.current
+
+
+CORRECT API USAGE PATTERN
+==========================
+
+From the .pyi stub file, the complete UserNotificationListener API is:
+
+  Class Properties:
+    current: typing.Optional[UserNotificationListener]  # ← Use this
+      Returns the current listener instance
+      Can be None if not available
+
+  Instance Methods:
+    add_notification_changed(handler)        # Subscribe to events
+    remove_notification_changed(token)       # Unsubscribe from events
+    get_access_status()                      # Check permissions
+    get_notification(notification_id)        # Get specific notification
+    get_notifications_async(kinds)           # Async: get all notifications
+    clear_notifications()                    # Clear notifications
+    remove_notification(notification_id)     # Remove specific notification
+    request_access_async()                   # Async: request permission
+
+
+EXACT CODE CHANGES REQUIRED
+===========================
+
+FILE: test_windows_notifications.py
+LOCATION: Line ~73
+
+CHANGE FROM:
+  try:
+      listener = UserNotificationListener.get_current()
+      print("[✓] UserNotificationListener.get_current() succeeded")
+  except Exception as e:
+      print(f"[✗] Failed to get listener: {e}")
+
+CHANGE TO:
+  try:
+      listener = UserNotificationListener.current
+      if listener is None:
+          raise RuntimeError("UserNotificationListener.current is None")
+      print("[✓] UserNotificationListener.current retrieved successfully")
+  except Exception as e:
+      print(f"[✗] Failed to get listener: {e}")
+
+
+FILE: test_windows_notifications_async.py
+LOCATION: Line ~70 (in initialize() method)
+
+CHANGE FROM:
+  try:
+      self.listener = UserNotificationListener.get_current()
+      print("[✓] UserNotificationListener initialized")
+      return True
+  except Exception as e:
+      print(f"[✗] Failed to initialize listener: {e}")
+
+CHANGE TO:
+  try:
+      self.listener = UserNotificationListener.current
+      if self.listener is None:
+          raise RuntimeError("UserNotificationListener.current is None")
+      print("[✓] UserNotificationListener initialized")
+      return True
+  except Exception as e:
+      print(f"[✗] Failed to initialize listener: {e}")
+
+
+VALIDATION: TESTING THE FIX
+============================
+
+Step 1: Run corrected code
+  E:\AICompanion\.venv\Scripts\python.exe test_windows_notifications.py
+
+Step 2: Expected output (if fix works)
+  [✓] winsdk imported successfully
+  [✓] UserNotificationListener.current retrieved successfully
+  [✓] Notification listener registered
+  
+  Listening for notifications...
+  Press Ctrl+C to exit.
+
+Step 3: Test with real notification
+  - Open Discord and receive message
+  - Verify output shows captured notification
+
+Step 4: If listener is None
+  Output would show:
+  [✗] Failed to get listener: UserNotificationListener.current is None
+  
+  This would mean:
+  - Windows 10+ not installed
+  - Notifications API unavailable
+  - Permission issue
+  - Unlikely, but handle gracefully
+
+
+RISK ASSESSMENT
+===============
+
+RISK 1: UserNotificationListener.current could be None
+Severity: LOW
+Explanation:
+  - The .current property CAN be None in some edge cases
+  - Particularly on older Windows or stripped configurations
+Mitigation:
+  - Check for None explicitly
+  - Provide clear error message
+  - Don't attempt to use None listener
+
+RISK 2: Future winsdk Version Changes
+Severity: VERY LOW
+Explanation:
+  - winsdk 1.0.0+ is approaching stable release
+  - Current API is unlikely to change again
+  - But always possible in future major versions
+Mitigation:
+  - Pin winsdk version in requirements.txt to 1.0.0b10 or later
+  - Document minimum version
+  - Monitor for breaking changes
+
+RISK 3: Documentation Confusion
+Severity: LOW (already mitigated)
+Explanation:
+  - Multiple online sources with different API versions
+  - Easy to copy wrong pattern
+Mitigation:
+  - Test with actual installed package (done)
+  - Use .pyi type stubs as source of truth (done)
+  - Document findings in POC
+
+RISK 4: Platform-Specific Edge Cases
+Severity: MEDIUM
+Explanation:
+  - Some Windows configurations may not support UserNotificationListener
+  - Corporate machines with MDM may block it
+  - Very old Windows 10 builds (pre-1607) don't have it
+Mitigation:
+  - Graceful degradation if listener is None
+  - Log warnings clearly
+  - Don't crash if notification listening unavailable
+
+
+SUMMARY
+=======
+
+Issue:      UserNotificationListener.get_current() does not exist
+Cause:      POC used outdated/incorrect API pattern
+Version:    winsdk 1.0.0b10 implements API as property, not method
+Fix:        Change get_current() to .current property
+Impact:     2-line changes in 2 files
+Risk:       Very low; primarily API usage correction
+Status:     Ready to implement
+
+
+IMPLEMENTATION STEPS
+====================
+
+1. Apply code changes to test_windows_notifications.py (2 lines)
+2. Apply code changes to test_windows_notifications_async.py (2 lines)
+3. Test with: E:\AICompanion\.venv\Scripts\python.exe test_windows_notifications.py
+4. Verify output shows listener successfully retrieved
+5. Trigger test notifications from Discord/Telegram
+6. Confirm captured output appears in console
+
+Total effort: ~5 minutes
+
+
+REFERENCES
+==========
+
+winsdk Package:
+  Location: E:\AICompanion\.venv\Lib\site-packages\winsdk
+  Type Stubs: windows\ui\notifications\management\__init__.pyi
+  
+Exact API Definition (from .pyi):
+  ```
+  class UserNotificationListener(winsdk.system.Object):
+      current: typing.ClassVar[typing.Optional[UserNotificationListener]]
+      ...
+  ```
+
+Official Windows Runtime Documentation:
+  https://docs.microsoft.com/en-us/uwp/api/windows.ui.notifications.management.usernotificationlistener
+
+"""

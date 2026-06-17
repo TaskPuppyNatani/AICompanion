@@ -1,0 +1,184 @@
+WINSDK 1.0.0b10 EVENT SUBSCRIPTION ROOT CAUSE ANALYSIS
+=====================================================
+
+ERROR: [WinError -2147023728] Element not found
+CODE: 0x80070490 (ERROR_NOT_FOUND in Windows API)
+
+═══════════════════════════════════════════════════════════
+
+ROOT CAUSE:
+───────────
+
+add_notification_changed() requires an ACTIVE UI THREAD with WinRT dispatcher context.
+
+Desktop Python (console/CLI scripts) do NOT have a UI thread.
+This is a WinRT architectural requirement, not a winsdk bug.
+
+═══════════════════════════════════════════════════════════
+
+ANALYSIS OF PREREQUISITES:
+───────────────────────────
+
+1. UserNotificationListener.current
+   Status: ✓ WORKS
+   Reason: Property access, no UI thread needed
+   
+2. request_access_async() 
+   Status: ✓ WORKS (can be awaited)
+   Result: Returns ALLOWED (enum value 1)
+   Reason: Async query only, no UI thread needed
+   
+3. get_notifications_async()
+   Status: ✓ WORKS (can be awaited)
+   Returns: IVectorView with existing notifications
+   Reason: Read-only query, no UI thread needed
+   
+4. add_notification_changed()
+   Status: ✗ FAILS with WinError -2147023728
+   Reason: REQUIRES UI THREAD CONTEXT
+   Requirement: Must be called from WinRT dispatcher thread
+   Desktop Python: NO dispatcher available
+   
+5. clear_notifications()
+   Status: ✗ FAILS with WinError -2147023728
+   Reason: Also requires UI thread context
+
+═══════════════════════════════════════════════════════════
+
+MICROSOFT DOCUMENTATION REQUIREMENT:
+─────────────────────────────────────
+
+From: https://learn.microsoft.com/en-us/uwp/api/windows.ui.notifications.management.usernotificationlistener
+
+"UserNotificationListener requires explicit user permission to be granted before
+it may be used, so before attempting to access notifications be sure you call
+RequestAccessAsync **from a UI-thread**."
+
+Key quote: "from a UI-thread" - This is mandatory for the entire API to work.
+
+═══════════════════════════════════════════════════════════
+
+WHY add_notification_changed() RETURNS ERROR_NOT_FOUND:
+───────────────────────────────────────────────────────
+
+When WinRT tries to register an event handler:
+1. It needs to attach the handler to the WinRT event infrastructure
+2. This infrastructure is thread-local and tied to the UI dispatcher
+3. Desktop Python has no dispatcher = no valid context
+4. WinRT returns ERROR_NOT_FOUND because the dispatcher context doesn't exist
+
+═══════════════════════════════════════════════════════════
+
+TESTED SCENARIOS:
+──────────────────
+
+✓ Scenario 1: Direct synchronous call
+  listener.add_notification_changed(handler)
+  Result: WinError -2147023728
+
+✓ Scenario 2: After awaiting request_access_async()
+  await listener.request_access_async()
+  listener.add_notification_changed(handler)
+  Result: WinError -2147023728 (access doesn't help)
+
+✓ Scenario 3: In async function
+  async def test():
+      listener.add_notification_changed(handler)
+  Result: WinError -2147023728 (asyncio is not a UI loop)
+
+✓ Scenario 4: After getting notifications
+  await listener.get_notifications_async(...)
+  listener.add_notification_changed(handler)
+  Result: WinError -2147023728 (state doesn't matter)
+
+═══════════════════════════════════════════════════════════
+
+SOLUTIONS:
+──────────
+
+Option 1: Qt6 Integration (PREFERRED FOR THIS PROJECT)
+└─ Use the Qt6 event loop in companion.py
+└─ Qt6 provides proper dispatcher/event context
+└─ Can call add_notification_changed from Qt's main thread
+└ Requires: Integration with companion.py's Qt6 app instance
+
+Option 2: Polling Approach (WORKAROUND)
+└─ Use polling instead of event subscription
+└─ Call get_notifications_async() periodically
+└─ Compare with previous state to detect changes
+└─ Works in desktop Python but less efficient
+
+Option 3: Native Windows API (ADVANCED)
+└─ Use ctypes to access Windows Notifications API directly
+└─ Bypass winsdk limitations
+└─ Requires significant low-level code
+
+═══════════════════════════════════════════════════════════
+
+EXACT CODE CHANGES FOR POC:
+───────────────────────────
+
+Current broken code in test_windows_notifications.py line ~180:
+
+    token = listener.add_notification_changed(on_notification_changed)
+    # ^ This WILL ALWAYS FAIL in desktop Python
+
+Option A: Use polling instead of events
+
+    async def poll_notifications():
+        from winsdk.windows.ui.notifications import NotificationKinds
+        previous_notifs = set()
+        
+        while True:
+            try:
+                result = await listener.get_notifications_async(NotificationKinds.TOAST)
+                current_notifs = {n.id for n in result}
+                
+                # Detect changes
+                new = current_notifs - previous_notifs
+                removed = previous_notifs - current_notifs
+                
+                if new:
+                    for notif_id in new:
+                        notif = listener.get_notification(notif_id)
+                        on_notification_changed(listener, notif)
+                
+                previous_notifs = current_notifs
+                
+            except Exception as e:
+                print(f"Poll error: {e}")
+            
+            await asyncio.sleep(1)  # Poll every second
+
+Option B: Use Qt6 (for companion.py integration only)
+
+    # In companion.py's CompanionApplication class:
+    from PySide6.QtCore import QTimer
+    
+    def init_notification_listener(self):
+        from winsdk.windows.ui.notifications.management import UserNotificationListener
+        
+        self.listener = UserNotificationListener.current
+        
+        # This will work because we're on the Qt6 main thread
+        self.token = self.listener.add_notification_changed(self.on_notification)
+        
+        # Also set up polling as fallback
+        self.notification_timer = QTimer()
+        self.notification_timer.timeout.connect(self.poll_notifications)
+        self.notification_timer.start(1000)  # 1 second
+
+═══════════════════════════════════════════════════════════
+
+CONCLUSION:
+───────────
+
+WinError -2147023728 is NOT fixable in standalone desktop Python.
+
+The POC test scripts (test_windows_notifications.py and async version)
+CANNOT successfully subscribe to add_notification_changed().
+
+For companion.py: Use Qt6's event loop context + polling as fallback.
+For standalone testing: Use polling approach instead of event subscription.
+
+═══════════════════════════════════════════════════════════
