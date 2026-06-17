@@ -3,12 +3,16 @@ import winsound
 import random
 import threading
 import time
+import subprocess
 from datetime import datetime
 from pathlib import Path
+import requests
 from config import (
     AUDIO_DIR,
     NOTIFY_SERVER_HOST,
     NOTIFY_SERVER_PORT,
+    API_HOST,
+    API_PORT,
 )
 
 
@@ -58,6 +62,12 @@ notification_label = None
 
 
 speaking = False
+speech_server_process = None
+speech_server_owned_by_companion = False
+
+SPEECH_HEALTHCHECK_URL = f"http://{API_HOST}:{API_PORT}/notes/recent"
+SPEECH_STARTUP_TIMEOUT_SEC = 45
+SPEECH_POLL_INTERVAL_SEC = 0.5
 
 
 class NotificationBridge(QObject):
@@ -191,6 +201,98 @@ notifications = [
     "Container restarted successfully.",
 ]
 
+
+def probe_speech_server_ready(timeout=1.0):
+    try:
+        response = requests.get(
+            SPEECH_HEALTHCHECK_URL,
+            timeout=timeout
+        )
+    except Exception as e:
+        return False, f"Request failed: {e}"
+
+    if response.status_code != 200:
+        return False, f"Unexpected status code: {response.status_code}"
+
+    try:
+        payload = response.json()
+    except Exception as e:
+        return False, f"Invalid JSON response: {e}"
+
+    if not isinstance(payload, list):
+        return False, f"Unexpected payload type: {type(payload).__name__}"
+
+    return True, None
+
+
+def launch_speech_server_process():
+    speech_server_path = Path(__file__).resolve().parent / "speech_server.py"
+
+    command = [
+        sys.executable,
+        str(speech_server_path),
+    ]
+
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(speech_server_path.parent)
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Launch failed for command {command}: {e}"
+        ) from e
+
+    return process, command
+
+
+def wait_for_speech_server_ready(timeout_seconds, poll_interval_seconds, process=None):
+    deadline = time.monotonic() + timeout_seconds
+    last_error = None
+
+    while time.monotonic() < deadline:
+        if process is not None:
+            return_code = process.poll()
+
+            if return_code is not None:
+                return False, f"Speech server exited with code {return_code}"
+
+        is_ready, error = probe_speech_server_ready()
+
+        if is_ready:
+            return True, None
+
+        last_error = error
+        time.sleep(poll_interval_seconds)
+
+    return False, last_error
+
+
+def terminate_managed_speech_server(timeout_seconds=5):
+    global speech_server_process
+    global speech_server_owned_by_companion
+
+    if not speech_server_owned_by_companion:
+        return
+
+    if speech_server_process is None:
+        return
+
+    try:
+        if speech_server_process.poll() is None:
+            speech_server_process.terminate()
+
+            try:
+                speech_server_process.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                speech_server_process.kill()
+                speech_server_process.wait(timeout=2)
+    except Exception as e:
+        print(f"Speech server shutdown error: {e}")
+    finally:
+        speech_server_process = None
+        speech_server_owned_by_companion = False
+
 def speak(message):
 
     global speaking
@@ -279,6 +381,8 @@ def clean_exit():
 
     notification_label.hide()
     label.hide()
+
+    terminate_managed_speech_server(timeout_seconds=5)
 
     stop_notification_server(timeout=3)
 
@@ -706,6 +810,8 @@ class CompanionApplication:
         app = QApplication(sys.argv)
         self.app = app
 
+        self._ensure_speech_server_ready()
+
         self._wire_notification_callbacks()
         self._setup_companion_widget()
         self._setup_notification_label()
@@ -717,6 +823,70 @@ class CompanionApplication:
     def _wire_notification_callbacks(self):
         bridge.notify_signal.connect(notify)
         register_notify_callback(bridge.notify_signal.emit)
+
+    def _ensure_speech_server_ready(self):
+        global speech_server_process
+        global speech_server_owned_by_companion
+
+        is_ready, _ = probe_speech_server_ready()
+
+        if is_ready:
+            speech_server_process = None
+            speech_server_owned_by_companion = False
+            print("Speech server already running; ownership marked external.")
+            return
+
+        try:
+            launched_process, command = launch_speech_server_process()
+        except RuntimeError as e:
+            print(
+                "Speech server startup failed. "
+                "Command: unavailable. "
+                f"Final probe error: {e}"
+            )
+
+            QMessageBox.critical(
+                None,
+                "Speech Server Unavailable",
+                (
+                    "Rivet could not start the speech server. "
+                    "Please ensure dependencies are installed and try again."
+                )
+            )
+
+            raise RuntimeError("Speech server failed to launch") from e
+
+        speech_server_process = launched_process
+
+        is_ready_after_launch, final_error = wait_for_speech_server_ready(
+            timeout_seconds=SPEECH_STARTUP_TIMEOUT_SEC,
+            poll_interval_seconds=SPEECH_POLL_INTERVAL_SEC,
+            process=launched_process,
+        )
+
+        if is_ready_after_launch:
+            speech_server_owned_by_companion = True
+            print("Speech server started by companion.")
+            return
+
+        print(
+            "Speech server startup failed. "
+            f"Command: {command}. "
+            f"Final probe error: {final_error}"
+        )
+
+        terminate_managed_speech_server(timeout_seconds=2)
+
+        QMessageBox.critical(
+            None,
+            "Speech Server Unavailable",
+            (
+                "Rivet could not start the speech server. "
+                "Please ensure dependencies are installed and try again."
+            )
+        )
+
+        raise RuntimeError("Speech server failed to start")
 
     def _setup_companion_widget(self):
         global label
@@ -808,7 +978,12 @@ class CompanionApplication:
 
 
 def main():
-    companion_application = CompanionApplication()
+    try:
+        companion_application = CompanionApplication()
+    except RuntimeError as e:
+        print(f"Startup error: {e}")
+        sys.exit(1)
+
     return_code = companion_application.run()
     sys.exit(return_code)
 
