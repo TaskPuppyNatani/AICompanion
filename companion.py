@@ -881,7 +881,7 @@ class CompanionApplication:
             None,
             "Speech Server Unavailable",
             (
-                "Rivet could not start the speech server. "
+                "Rivet could not start the speech server."
                 "Please ensure dependencies are installed and try again."
             )
         )
