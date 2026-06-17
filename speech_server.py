@@ -20,6 +20,7 @@ from config import (
     TTS_SAMPLE_RATE,
     NOTES_FILE,
     PERSONALITY_FILE,
+    MEMORY_FILE,
     )
 
 from speech_data.notes_data import NOTE_CONFIRMATIONS, CATEGORY_KEYWORDS
@@ -39,8 +40,6 @@ except Exception:
     WhisperModel = None
 
 app = Flask(__name__)
-
-MEMORY_FILE = Path("memory.json")
 
 #PERSONALITY_FILE = Path("speech_data/personality.md")
 
@@ -171,6 +170,8 @@ PERSONALITY = load_personality()
 llm_service = LLMService()
 
 def load_memory():
+    MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
     if MEMORY_FILE.exists():
         with open(MEMORY_FILE, "r") as f:
             return json.load(f)
@@ -184,6 +185,8 @@ def load_memory():
 
 
 def save_memory(memory):
+    MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+
     with open(MEMORY_FILE, "w") as f:
         json.dump(memory, f, indent=4)
 
