@@ -1,0 +1,10 @@
+{
+    "avatar": "lombax.png",
+    "avatar_size": 150,
+    "notification_duration": 5000,
+    "voice_enabled": true,
+    "avatar_position": {
+        "x": 217,
+        "y": 1224
+    }
+}

@@ -353,6 +353,9 @@ class Companion(QLabel):
         enabled = not voice_enabled()
         save_voice_enabled(enabled)
 
+        if not enabled:
+            winsound.PlaySound(None, 0)
+
         if enabled:
             notify("Voice unmuted.")
         else:
