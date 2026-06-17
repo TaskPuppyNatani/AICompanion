@@ -2,12 +2,21 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 
-DATA_DIR = BASE_DIR / "speech_data"
-PERSONALITY_FILE = DATA_DIR / "personality.md"
-NOTES_FILE = DATA_DIR / "notes.json"
-MEMORY_FILE = DATA_DIR / "memory.json"
+APP_DIR = BASE_DIR
+DATA_DIR = APP_DIR / "data"
+RUNTIME_DIR = APP_DIR / "runtime"
+TEMP_DIR = APP_DIR / "temp"
 
-API_HOST = "192.168.1.4"
+CONFIG_DIR = DATA_DIR / "config"
+SPEECH_DATA_DIR = APP_DIR / "speech_data"
+AUDIO_DIR = RUNTIME_DIR / "audio"
+LOG_DIR = RUNTIME_DIR / "logs"
+
+PERSONALITY_FILE = SPEECH_DATA_DIR / "personality.md"
+NOTES_FILE = SPEECH_DATA_DIR / "notes.json"
+MEMORY_FILE = SPEECH_DATA_DIR / "memory.json"
+
+API_HOST = "127.0.0.1"
 API_PORT = 5001
 
 BASE_URL = f"http://{API_HOST}:{API_PORT}"
