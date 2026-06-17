@@ -1,7 +1,7 @@
 from kokoro import KPipeline
 import soundfile as sf
 import sys
-from config import TTS_LANG_CODE, TTS_VOICE, TTS_SAMPLE_RATE
+from config import AUDIO_DIR, TTS_LANG_CODE, TTS_VOICE, TTS_SAMPLE_RATE
 
 if len(sys.argv) < 2:
     print("Usage: python speak.py \"text to speak\"")
@@ -18,7 +18,10 @@ generator = pipeline(
     voice=TTS_VOICE
 )
 
-for i, (gs, ps, audio) in enumerate(generator):
-    sf.write("output.wav", audio, TTS_SAMPLE_RATE)
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+output_path = AUDIO_DIR / "output.wav"
 
-print("Saved output.wav")
+for i, (gs, ps, audio) in enumerate(generator):
+    sf.write(output_path, audio, TTS_SAMPLE_RATE)
+
+print(f"Saved {output_path}")

@@ -6,6 +6,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from config import (
+    AUDIO_DIR,
     NOTIFY_SERVER_HOST,
     NOTIFY_SERVER_PORT,
 )
@@ -203,13 +204,16 @@ def speak(message):
     speaking = True
 
     try:
+        AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+        speech_file_path = AUDIO_DIR / "speech.wav"
+
         audio_content = api_client.speak(message)
 
-        with open("speech.wav", "wb") as f:
+        with open(speech_file_path, "wb") as f:
             f.write(audio_content)
 
         winsound.PlaySound(
-            "speech.wav",
+            str(speech_file_path),
             winsound.SND_FILENAME
         )
 
