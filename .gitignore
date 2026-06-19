@@ -1,0 +1,22 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# VS Code
+.vscode/
+
+# Continue extension workspace
+.continue/
+
+# Runtime generated audio
+runtime/audio/*.wav
+
+# Runtime memory data
+speech_data/memory.json
+
+# Windows junk
+Thumbs.db
+Desktop.ini
