@@ -1,4 +1,6 @@
 import sys
+import shutil
+import os
 import winsound
 import random
 import threading
@@ -13,6 +15,9 @@ from config import (
     NOTIFY_SERVER_PORT,
     API_HOST,
     API_PORT,
+    OLLAMA_HOST,
+    OLLAMA_PORT,
+    OLLAMA_HEALTH_URL,
 )
 
 
@@ -44,6 +49,10 @@ from companion_app.local_notify_server import (
     start_notification_server,
     stop_notification_server,
 )
+from companion_app.windows_notification_listener import (
+    start_windows_notification_listener,
+    stop_windows_notification_listener,
+)
 
 from config import NOTIFY_SERVER_HOST
 from config_store import (
@@ -68,6 +77,9 @@ speech_server_owned_by_companion = False
 SPEECH_HEALTHCHECK_URL = f"http://{API_HOST}:{API_PORT}/notes/recent"
 SPEECH_STARTUP_TIMEOUT_SEC = 45
 SPEECH_POLL_INTERVAL_SEC = 0.5
+
+OLLAMA_STARTUP_TIMEOUT_SEC = 15
+OLLAMA_FALLBACK_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
 
 
 class NotificationBridge(QObject):
@@ -202,6 +214,41 @@ notifications = [
 ]
 
 
+def probe_ollama_ready(timeout=1.0):
+    try:
+        response = requests.get(OLLAMA_HEALTH_URL, timeout=timeout)
+        return response.status_code == 200, None
+    except Exception as e:
+        return False, f"Request failed: {e}"
+
+
+def _find_ollama_exe():
+    found = shutil.which("ollama")
+    if found:
+        return Path(found)
+    if OLLAMA_FALLBACK_EXE.is_file():
+        return OLLAMA_FALLBACK_EXE
+    return None
+
+
+def launch_ollama_process():
+    exe = _find_ollama_exe()
+    if exe is None:
+        raise RuntimeError("ollama executable not found on PATH or fallback location")
+
+    command = [str(exe), "serve"]
+    try:
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as e:
+        raise RuntimeError(f"Launch failed for command {command}: {e}") from e
+
+    return process, command
+
+
 def probe_speech_server_ready(timeout=1.0):
     try:
         response = requests.get(
@@ -246,7 +293,7 @@ def launch_speech_server_process():
     return process, command
 
 
-def wait_for_speech_server_ready(timeout_seconds, poll_interval_seconds, process=None):
+def wait_for_speech_server_ready(timeout_seconds, poll_interval_seconds, process=None, probe_fn=probe_speech_server_ready):
     deadline = time.monotonic() + timeout_seconds
     last_error = None
 
@@ -257,7 +304,7 @@ def wait_for_speech_server_ready(timeout_seconds, poll_interval_seconds, process
             if return_code is not None:
                 return False, f"Speech server exited with code {return_code}"
 
-        is_ready, error = probe_speech_server_ready()
+        is_ready, error = probe_fn()
 
         if is_ready:
             return True, None
@@ -383,6 +430,8 @@ def clean_exit():
     label.hide()
 
     terminate_managed_speech_server(timeout_seconds=5)
+
+    stop_windows_notification_listener(timeout_seconds=3)
 
     stop_notification_server(timeout=3)
 
@@ -810,6 +859,7 @@ class CompanionApplication:
         app = QApplication(sys.argv)
         self.app = app
 
+        self._ensure_ollama_ready()
         self._ensure_speech_server_ready()
 
         self._wire_notification_callbacks()
@@ -818,11 +868,54 @@ class CompanionApplication:
         self._setup_avatar()
         self._setup_startup_notifications()
         self._setup_notification_server()
+        self._create_windows_notification_listener()
         self._setup_shutdown_wiring()
 
     def _wire_notification_callbacks(self):
         bridge.notify_signal.connect(notify)
         register_notify_callback(bridge.notify_signal.emit)
+
+    def _ensure_ollama_ready(self):
+        is_ready, _ = probe_ollama_ready()
+        if is_ready:
+            print("Ollama already running; no launch needed.")
+            return
+
+        try:
+            launched_process, command = launch_ollama_process()
+        except RuntimeError as e:
+            print(f"Ollama launch failed: {e}")
+            QMessageBox.warning(
+                None,
+                "Ollama Unavailable",
+                (
+                    "Rivet could not start Ollama. "
+                    "Please start Ollama manually and try again."
+                )
+            )
+            raise RuntimeError("Ollama failed to launch") from e
+
+        is_ready_after_launch, final_error = wait_for_speech_server_ready(
+            timeout_seconds=OLLAMA_STARTUP_TIMEOUT_SEC,
+            poll_interval_seconds=SPEECH_POLL_INTERVAL_SEC,
+            process=launched_process,
+            probe_fn=probe_ollama_ready,
+        )
+
+        if is_ready_after_launch:
+            print("Ollama started by companion (unowned).")
+            return
+
+        print(f"Ollama did not become ready in time. Last error: {final_error}")
+        QMessageBox.warning(
+            None,
+            "Ollama Unavailable",
+            (
+                "Rivet could not confirm Ollama is running. "
+                "Please start Ollama manually and try again."
+            )
+        )
+        raise RuntimeError("Ollama failed to become ready")
 
     def _ensure_speech_server_ready(self):
         global speech_server_process
@@ -969,6 +1062,13 @@ class CompanionApplication:
             port=NOTIFY_SERVER_PORT,
             chat_resolver=ask_ratchet
         )
+
+    def _create_windows_notification_listener(self):
+        try:
+            start_windows_notification_listener()
+            print("Windows notification listener started.")
+        except Exception as e:
+            print(f"Warning: Windows notification listener failed to start: {e}")
 
     def _setup_shutdown_wiring(self):
         self.app.aboutToQuit.connect(clean_exit)

@@ -7,6 +7,7 @@ from datetime import datetime
 import requests
 
 from config import NOTIFY_ENDPOINT_URL
+from companion_app.notification_filters import should_process_notification
 
 
 POLL_INTERVAL_SECONDS = 1.0
@@ -85,6 +86,13 @@ class WindowsNotificationListenerThread(threading.Thread):
                     continue
 
                 self._remember_notification_id(notification_id)
+                app_name = self._extract_app_name(notification)
+                title, _ = self._extract_title_and_body(notification)
+                print(f"[NOTIFY] App='{app_name}' Title='{title}'")
+
+                if not should_process_notification(app_name):
+                    continue
+
                 payload = self._normalize_payload(notification, notification_id)
                 self._post_notification(payload)
 
