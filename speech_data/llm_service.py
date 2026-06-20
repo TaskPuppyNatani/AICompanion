@@ -13,9 +13,9 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 from config import (
     OLLAMA_GENERATE_URL,
-    OLLAMA_MODEL_NAME,
     OLLAMA_REQUEST_TIMEOUT_SEC,
 )
+from companion_app.model_profiles import get_active_model_name
 
 
 #OLLAMA_GENERATE_URL = "http://127.0.0.1:11434/api/generate"
@@ -64,8 +64,10 @@ class LLMService:
         if not isinstance(prompt, str) or not prompt.strip():
             return None
 
+        model_name = get_active_model_name()
+
         payload = {
-            "model": OLLAMA_MODEL_NAME,
+            "model": model_name,
             "prompt": prompt,
             "stream": False,
         }
