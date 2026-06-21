@@ -327,7 +327,7 @@ def chat():
 
                 llm_click_response = None
 
-                if event == "click" and random.random() < 1.0:
+                if event == "click" and random.random() < 0.75:
                     click_context = build_llm_context(
                         latest_note_text=latest_note_text or None
                     )

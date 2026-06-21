@@ -409,10 +409,18 @@ def notify(message):
         daemon=True
     ).start()
 
-    QTimer.singleShot(
-        config["notification_duration"],
-        notification_label.hide
+    duration_ms = min(
+        20000,
+        max(config["notification_duration"], len(message) * 55)
     )
+
+    if not hasattr(notification_label, "_hide_timer"):
+        notification_label._hide_timer = QTimer()
+        notification_label._hide_timer.setSingleShot(True)
+        notification_label._hide_timer.timeout.connect(notification_label.hide)
+
+    notification_label._hide_timer.stop()
+    notification_label._hide_timer.start(duration_ms)
 
 
 is_shutting_down = False

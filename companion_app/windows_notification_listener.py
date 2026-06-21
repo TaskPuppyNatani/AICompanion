@@ -87,10 +87,11 @@ class WindowsNotificationListenerThread(threading.Thread):
 
                 self._remember_notification_id(notification_id)
                 app_name = self._extract_app_name(notification)
-                title, _ = self._extract_title_and_body(notification)
+                title, body = self._extract_title_and_body(notification)
                 print(f"[NOTIFY] App='{app_name}' Title='{title}'")
 
                 if not should_process_notification(app_name):
+                    print(f"[NOTIFY FILTERED] App='{app_name}'")
                     continue
 
                 payload = self._normalize_payload(notification, notification_id)
