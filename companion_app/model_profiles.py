@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 from config import OLLAMA_MODEL_NAME
 from config_store import get_config_value, set_config_value
 
@@ -27,9 +25,8 @@ def load_model_profiles() -> dict[str, dict[str, str]]:
         if not isinstance(profile_value, dict):
             continue
 
-        model_name = profile_value.get("model_name")
-        if not isinstance(model_name, str) or not model_name.strip():
-            continue
+        model_name_raw = profile_value.get("model_name")
+        model_name = model_name_raw.strip() if isinstance(model_name_raw, str) else ""
 
         display_name = profile_value.get("display_name")
         if not isinstance(display_name, str) or not display_name.strip():
@@ -47,7 +44,7 @@ def list_model_profiles() -> dict[str, dict[str, str]]:
     return load_model_profiles()
 
 
-def get_active_model_profile_key() -> str:
+def get_active_profile_name() -> str:
     configured_key = get_config_value(
         "active_model_profile",
         DEFAULT_ACTIVE_MODEL_PROFILE,
@@ -58,29 +55,29 @@ def get_active_model_profile_key() -> str:
 
     profiles = load_model_profiles()
 
-    if not profiles:
-        return configured_key
-
     if configured_key in profiles:
         return configured_key
 
-    if DEFAULT_ACTIVE_MODEL_PROFILE in profiles:
-        fallback_key = DEFAULT_ACTIVE_MODEL_PROFILE
-    else:
-        fallback_key = next(iter(profiles))
+    fallback_key = DEFAULT_ACTIVE_MODEL_PROFILE
 
-    print(
-        "[MODEL] Active profile "
-        f"'{configured_key}' is not configured; "
-        f"falling back to profile '{fallback_key}'."
-    )
+    if configured_key != fallback_key:
+        print(
+            "[MODEL] Active profile "
+            f"'{configured_key}' is not configured; "
+            f"falling back to profile '{fallback_key}'."
+        )
 
     return fallback_key
 
 
-def get_active_model_profile() -> dict[str, str]:
+def get_active_model_profile_key() -> str:
+    """Backward-compatible alias for profile name resolution."""
+    return get_active_profile_name()
+
+
+def get_active_profile() -> dict[str, str]:
     profiles = load_model_profiles()
-    profile_key = get_active_model_profile_key()
+    profile_key = get_active_profile_name()
 
     profile = profiles.get(profile_key)
     if profile:
@@ -92,30 +89,20 @@ def get_active_model_profile() -> dict[str, str]:
     }
 
 
+def get_active_model_profile() -> dict[str, str]:
+    """Backward-compatible alias for active profile data."""
+    return get_active_profile()
+
+
 def get_active_model_name() -> str:
     profiles = load_model_profiles()
-
-    if not profiles:
-        print(
-            "[MODEL] No model profiles configured; "
-            f"using fallback model='{OLLAMA_MODEL_NAME}'."
-        )
-        return OLLAMA_MODEL_NAME
-
-    profile_key = get_active_model_profile_key()
-    profile = profiles.get(profile_key)
-
-    if not profile:
-        print(
-            "[MODEL] Active profile lookup failed; "
-            f"using fallback model='{OLLAMA_MODEL_NAME}'."
-        )
-        return OLLAMA_MODEL_NAME
+    profile_key = get_active_profile_name()
+    profile = profiles.get(profile_key) or {}
 
     model_name = profile.get("model_name", "")
     if not isinstance(model_name, str) or not model_name.strip():
         print(
-            f"[MODEL] Profile '{profile_key}' has invalid model_name; "
+            f"[MODEL] Active profile='{profile_key}' has invalid model_name; "
             f"using fallback model='{OLLAMA_MODEL_NAME}'."
         )
         return OLLAMA_MODEL_NAME
@@ -124,13 +111,14 @@ def get_active_model_name() -> str:
     return model_name
 
 
-def set_active_model_profile(profile_key: str) -> None:
+def set_active_model_profile(profile_key: str) -> bool:
     if not isinstance(profile_key, str) or not profile_key.strip():
         raise ValueError("profile_key must be a non-empty string")
 
     profiles = load_model_profiles()
 
-    if profiles and profile_key not in profiles:
-        raise ValueError(f"Unknown model profile: {profile_key}")
+    if profile_key not in profiles:
+        return False
 
     set_config_value("active_model_profile", profile_key)
+    return True
