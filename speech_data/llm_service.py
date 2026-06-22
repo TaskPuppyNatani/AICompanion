@@ -7,15 +7,8 @@ now and returns no generated text.
 
 from __future__ import annotations
 
-import json
 from typing import Any
-from urllib.error import URLError
-from urllib.request import Request, urlopen
-from config import (
-    OLLAMA_GENERATE_URL,
-    OLLAMA_REQUEST_TIMEOUT_SEC,
-)
-from companion_app.model_profiles import get_active_model_name
+from speech_data.provider_factory import get_active_provider
 
 
 #OLLAMA_GENERATE_URL = "http://127.0.0.1:11434/api/generate"
@@ -61,44 +54,8 @@ class LLMService:
         This helper is intentionally not wired into existing response methods,
         so current fallback behavior remains unchanged.
         """
-        if not isinstance(prompt, str) or not prompt.strip():
-            return None
-
-        model_name = get_active_model_name()
-
-        payload = {
-            "model": model_name,
-            "prompt": prompt,
-            "stream": False,
-        }
-
-        request = Request(
-            OLLAMA_GENERATE_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
-        try:
-            with urlopen(request, timeout=OLLAMA_REQUEST_TIMEOUT_SEC) as response:
-                if getattr(response, "status", 200) >= 400:
-                    return None
-
-                response_data = response.read().decode("utf-8")
-
-            parsed = json.loads(response_data)
-
-        except (OSError, URLError, ValueError, TypeError) as e:
-            print("OLLAMA FAILED:", repr(e))
-            return None
-
-        generated_text = parsed.get("response")
-
-        if not isinstance(generated_text, str):
-            return None
-
-        generated_text = generated_text.strip()
-        return generated_text or None
+        provider = get_active_provider()
+        return provider.generate_text(prompt)
 
     def generate_click_response(self, context: dict[str, Any]) -> str | None:
         """Generate an experimental click response via Ollama."""
