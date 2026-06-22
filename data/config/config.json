@@ -1,10 +1,29 @@
 {
     "avatar": "lombax.png",
     "avatar_size": 150,
-    "notification_duration": 5000,
+    "notification_duration": 12000,
     "voice_enabled": true,
     "avatar_position": {
-        "x": 851,
-        "y": 1066
+        "x": 684,
+        "y": 947
+    },
+    "active_model_profile": "gemma_test",
+    "model_profiles": {
+        "fast": {
+            "display_name": "Fast",
+            "model_name": "phi4-mini:latest"
+        },
+        "balanced": {
+            "display_name": "Balanced",
+            "model_name": "qwen2.5-coder:3b"
+        },
+        "smart": {
+            "display_name": "Smart",
+            "model_name": "gemma4:26b"
+        },
+        "gemma_test": {
+            "display_name": "Gemma Test",
+            "model_name": "maxwellb/gemma4-12b-it-oym:latest"
+        }
     }
 }
