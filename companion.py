@@ -458,6 +458,10 @@ class Companion(QLabel):
         self.avatar_x = 0
         self.avatar_y = 0
         self.context_menu = QMenu(self)
+        self.model_profiles_menu = self.context_menu.addMenu("Model Profiles")
+        self.model_profiles_menu.aboutToShow.connect(
+            self.refresh_model_profiles_menu
+        )
 
         exit_action = self.context_menu.addAction("Exit")
         exit_action.triggered.connect(clean_exit)
@@ -476,6 +480,8 @@ class Companion(QLabel):
 
         voice_note_action = self.context_menu.addAction("Voice Note")
         voice_note_action.triggered.connect(self.voice_note_dialog)
+
+        self.refresh_model_profiles_menu()
 
     def set_avatar_position(self, new_x, new_y):
         self.avatar_x = int(new_x)
@@ -509,6 +515,62 @@ class Companion(QLabel):
         except Exception as e:
             print(f"Reload personality error: {e}")
             notify("Failed to reload personality.")
+
+    def refresh_model_profiles_menu(self):
+        self.model_profiles_menu.clear()
+
+        try:
+            payload = api_client.get_model_profiles()
+        except Exception as e:
+            print(f"Load model profiles error: {e}")
+            unavailable_action = self.model_profiles_menu.addAction(
+                "Profiles unavailable"
+            )
+            unavailable_action.setEnabled(False)
+            return
+
+        profiles = payload.get("profiles", {})
+        active_profile = payload.get("active_profile", "")
+
+        if not isinstance(profiles, dict) or not profiles:
+            empty_action = self.model_profiles_menu.addAction("No profiles configured")
+            empty_action.setEnabled(False)
+            return
+
+        for profile_key, profile in profiles.items():
+            if not isinstance(profile, dict):
+                continue
+
+            display_name = profile.get("display_name")
+            if not isinstance(display_name, str) or not display_name.strip():
+                display_name = str(profile_key).replace("_", " ").title()
+
+            action = self.model_profiles_menu.addAction(display_name.strip())
+            action.setCheckable(True)
+            action.setChecked(profile_key == active_profile)
+            action.triggered.connect(
+                lambda checked=False, key=profile_key: self.switch_model_profile(key)
+            )
+
+    def switch_model_profile(self, profile_key):
+        try:
+            payload = api_client.set_active_model_profile(profile_key)
+        except Exception as e:
+            print(f"Switch model profile error: {e}")
+            notify("Could not switch model profile.")
+            return
+
+        if payload.get("status") != "success":
+            notify("Could not switch model profile.")
+            return
+
+        profile = payload.get("profile", {})
+        display_name = profile.get("display_name")
+        if not isinstance(display_name, str) or not display_name.strip():
+            display_name = str(profile_key).replace("_", " ").title()
+
+        self.refresh_model_profiles_menu()
+        notify(f"Switched to {display_name.strip()} profile.")
 
     def mute_voice(self):
         enabled = not voice_enabled()

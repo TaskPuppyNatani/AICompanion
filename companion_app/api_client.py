@@ -99,6 +99,24 @@ def transcribe_audio(audio_path):
 
     return response.json()
 
+
+def get_model_profiles():
+    response = requests.get(
+        f"{BASE_URL}/model_profiles",
+        timeout=API_TIMEOUT_RELOAD_SEC
+    )
+    return response.json()
+
+
+def set_active_model_profile(profile_key):
+    response = requests.post(
+        f"{BASE_URL}/model_profiles/active",
+        json={"profile_key": profile_key},
+        timeout=API_TIMEOUT_RELOAD_SEC
+    )
+    return response.json()
+
+
 def reload_personality():
     response = requests.post(
         f"{BASE_URL}/reload_personality",

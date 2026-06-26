@@ -4,10 +4,10 @@
     "notification_duration": 12000,
     "voice_enabled": true,
     "avatar_position": {
-        "x": 684,
-        "y": 947
+        "x": 981,
+        "y": 1170
     },
-    "active_model_profile": "gemma_test",
+    "active_model_profile": "smart",
     "model_profiles": {
         "fast": {
             "display_name": "Fast",

@@ -33,6 +33,11 @@ from speech_data.chat_data import (
     DISCORD_SENDER_RESPONSES,
 )
 from speech_data.llm_service import LLMService
+from companion_app.model_profiles import (
+    get_active_profile_name,
+    list_model_profiles,
+    set_active_model_profile,
+)
 
 try:
     from faster_whisper import WhisperModel
@@ -488,6 +493,43 @@ def transcribe_note_endpoint():
                 Path(temp_audio_path).unlink()
             except OSError:
                 pass
+
+
+@app.route("/model_profiles", methods=["GET"])
+def model_profiles_endpoint():
+    return jsonify({
+        "active_profile": get_active_profile_name(),
+        "profiles": list_model_profiles(),
+    })
+
+
+@app.route("/model_profiles/active", methods=["POST"])
+def set_active_model_profile_endpoint():
+    data = request.json or {}
+    profile_key = data.get("profile_key")
+
+    if not isinstance(profile_key, str) or not profile_key.strip():
+        return jsonify({
+            "status": "error",
+            "message": "profile_key is required",
+        }), 400
+
+    profile_key = profile_key.strip()
+
+    if not set_active_model_profile(profile_key):
+        return jsonify({
+            "status": "error",
+            "message": "Unknown model profile",
+        }), 404
+
+    profiles = list_model_profiles()
+
+    return jsonify({
+        "status": "success",
+        "active_profile": get_active_profile_name(),
+        "profile": profiles.get(profile_key, {}),
+    })
+
 
 @app.route("/speak", methods=["POST"])
 def speak():
