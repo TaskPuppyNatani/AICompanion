@@ -1,13 +1,13 @@
 {
     "avatar": "lombax.png",
-    "avatar_size": 150,
+    "avatar_size": 72,
     "notification_duration": 12000,
     "voice_enabled": true,
     "avatar_position": {
-        "x": 981,
-        "y": 1170
+        "x": 1284,
+        "y": 658
     },
-    "active_model_profile": "smart",
+    "active_model_profile": "fast",
     "model_profiles": {
         "fast": {
             "display_name": "Fast",
@@ -15,15 +15,11 @@
         },
         "balanced": {
             "display_name": "Balanced",
-            "model_name": "qwen2.5-coder:3b"
+            "model_name": "maxwellb/gemma4-12b-it-oym:latest"
         },
         "smart": {
             "display_name": "Smart",
             "model_name": "gemma4:26b"
-        },
-        "gemma_test": {
-            "display_name": "Gemma Test",
-            "model_name": "maxwellb/gemma4-12b-it-oym:latest"
         }
     }
 }

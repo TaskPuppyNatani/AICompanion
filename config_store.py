@@ -21,7 +21,7 @@ DEFAULT_CONFIG = {
         },
         "balanced": {
             "display_name": "Balanced",
-            "model_name": "qwen2.5-coder:3b",
+            "model_name": "maxwellb/gemma4-12b-it-oym:latest",
         },
         "smart": {
             "display_name": "Smart",
