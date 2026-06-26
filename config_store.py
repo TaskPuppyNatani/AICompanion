@@ -52,6 +52,12 @@ else:
 if not isinstance(config.get("voice_enabled", True), bool):
     config["voice_enabled"] = True
 
+if (
+    type(config.get("avatar_size")) is not int
+    or config["avatar_size"] <= 0
+):
+    config["avatar_size"] = DEFAULT_CONFIG["avatar_size"]
+
 if not isinstance(config.get("active_model_profile", "fast"), str):
     config["active_model_profile"] = "fast"
 

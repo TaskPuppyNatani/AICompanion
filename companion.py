@@ -59,6 +59,7 @@ from config_store import (
     config,
     saved_avatar_position,
     save_avatar_position,
+    set_config_value,
     voice_enabled,
     save_voice_enabled,
 )
@@ -462,6 +463,7 @@ class Companion(QLabel):
         self.avatar_y = 0
         self.avatar_source_pixmap = None
         self.avatar_size = None
+        self.avatar_resized = False
         self.context_menu = QMenu(self)
         self.model_profiles_menu = self.context_menu.addMenu("Model Profiles")
         self.model_profiles_menu.aboutToShow.connect(
@@ -947,6 +949,7 @@ class Companion(QLabel):
 
         direction = 1 if delta > 0 else -1
         self.resize_avatar(current_size + (direction * AVATAR_RESIZE_STEP))
+        self.avatar_resized = True
         event.accept()
 
     def mouseMoveEvent(self, event):
@@ -971,8 +974,12 @@ class Companion(QLabel):
             avatar_x, avatar_y = self.get_avatar_position()
             save_avatar_position(avatar_x, avatar_y)
 
+        if self.avatar_resized and self.avatar_size is not None:
+            set_config_value("avatar_size", self.avatar_size)
+
         self.drag_offset = None
         self.dragged = False
+        self.avatar_resized = False
         event.accept()
 
 
