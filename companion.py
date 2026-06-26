@@ -80,6 +80,8 @@ SPEECH_POLL_INTERVAL_SEC = 0.5
 
 OLLAMA_STARTUP_TIMEOUT_SEC = 15
 OLLAMA_FALLBACK_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
+AVATAR_MIN_SIZE = 64
+AVATAR_MAX_SIZE = 320
 
 
 class NotificationBridge(QObject):
@@ -494,6 +496,25 @@ class Companion(QLabel):
 
     def get_avatar_position(self):
         return self.avatar_x, self.avatar_y
+
+    def resize_avatar(self, new_size: int):
+        if self.avatar_source_pixmap is None:
+            return
+
+        avatar_size = max(AVATAR_MIN_SIZE, min(AVATAR_MAX_SIZE, int(new_size)))
+
+        pixmap = self.avatar_source_pixmap.scaled(
+            avatar_size,
+            avatar_size,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation
+        )
+
+        self.setPixmap(pixmap)
+        self.resize(pixmap.size())
+
+        if notification_label is not None and notification_label.isVisible():
+            self.update_notification_bubble_position()
 
     def update_notification_bubble_position(self):
         if notification_label is None:
@@ -1081,21 +1102,15 @@ class CompanionApplication:
 
         pixmap = QPixmap(str(image_path))
         label.avatar_source_pixmap = pixmap
+        label.resize_avatar(config["avatar_size"])
 
-        pixmap = pixmap.scaled(
-            config["avatar_size"],
-            config["avatar_size"],
-            Qt.AspectRatioMode.KeepAspectRatio,
-            Qt.TransformationMode.SmoothTransformation
-        )
-
-        label.setPixmap(pixmap)
+        display_pixmap = label.pixmap()
 
         screen = QGuiApplication.primaryScreen()
         geometry = screen.availableGeometry()
 
-        initial_x = geometry.width() - pixmap.width() - 20
-        initial_y = geometry.height() - pixmap.height() - 20
+        initial_x = geometry.width() - display_pixmap.width() - 20
+        initial_y = geometry.height() - display_pixmap.height() - 20
 
         saved_position = saved_avatar_position()
 
