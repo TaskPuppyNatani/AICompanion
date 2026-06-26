@@ -457,6 +457,7 @@ class Companion(QLabel):
         self.transcribing_dialog = None
         self.avatar_x = 0
         self.avatar_y = 0
+        self.avatar_source_pixmap = None
         self.context_menu = QMenu(self)
         self.model_profiles_menu = self.context_menu.addMenu("Model Profiles")
         self.model_profiles_menu.aboutToShow.connect(
@@ -1079,6 +1080,7 @@ class CompanionApplication:
         image_path = Path(__file__).parent / config["avatar"]
 
         pixmap = QPixmap(str(image_path))
+        label.avatar_source_pixmap = pixmap
 
         pixmap = pixmap.scaled(
             config["avatar_size"],
