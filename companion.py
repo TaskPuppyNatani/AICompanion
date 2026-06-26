@@ -82,6 +82,7 @@ OLLAMA_STARTUP_TIMEOUT_SEC = 15
 OLLAMA_FALLBACK_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
 AVATAR_MIN_SIZE = 64
 AVATAR_MAX_SIZE = 320
+AVATAR_RESIZE_STEP = 8
 
 
 class NotificationBridge(QObject):
@@ -460,6 +461,7 @@ class Companion(QLabel):
         self.avatar_x = 0
         self.avatar_y = 0
         self.avatar_source_pixmap = None
+        self.avatar_size = None
         self.context_menu = QMenu(self)
         self.model_profiles_menu = self.context_menu.addMenu("Model Profiles")
         self.model_profiles_menu.aboutToShow.connect(
@@ -502,6 +504,7 @@ class Companion(QLabel):
             return
 
         avatar_size = max(AVATAR_MIN_SIZE, min(AVATAR_MAX_SIZE, int(new_size)))
+        self.avatar_size = avatar_size
 
         pixmap = self.avatar_source_pixmap.scaled(
             avatar_size,
@@ -915,6 +918,36 @@ class Companion(QLabel):
         print(phrase)
 
         notify(phrase)
+
+    def wheelEvent(self, event):
+        buttons = event.buttons()
+
+        if not buttons & Qt.MouseButton.RightButton:
+            buttons = QApplication.mouseButtons()
+
+        if not buttons & Qt.MouseButton.RightButton:
+            super().wheelEvent(event)
+            return
+
+        delta = event.angleDelta().y()
+
+        if delta == 0:
+            event.accept()
+            return
+
+        current_size = self.avatar_size
+
+        if current_size is None:
+            pixmap = self.pixmap()
+            if pixmap is None:
+                event.accept()
+                return
+
+            current_size = max(pixmap.width(), pixmap.height())
+
+        direction = 1 if delta > 0 else -1
+        self.resize_avatar(current_size + (direction * AVATAR_RESIZE_STEP))
+        event.accept()
 
     def mouseMoveEvent(self, event):
 
