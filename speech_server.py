@@ -83,6 +83,21 @@ def add_note(note_text, category=None):
 
     save_notes(notes)
 
+
+def delete_note(note_index):
+    notes = load_notes()
+
+    if not isinstance(note_index, int):
+        return None
+
+    if note_index < 0 or note_index >= len(notes):
+        return None
+
+    deleted_note = notes.pop(note_index)
+    save_notes(notes)
+    return deleted_note
+
+
 def get_latest_note():
     notes = load_notes()
 
@@ -400,6 +415,23 @@ def latest_note():
 @app.route("/notes", methods=["GET"])
 def get_notes():
     return jsonify(load_notes())
+
+
+@app.route("/notes/<int:note_index>", methods=["DELETE"])
+def delete_note_endpoint(note_index):
+    deleted_note = delete_note(note_index)
+
+    if deleted_note is None:
+        return jsonify({
+            "status": "error",
+            "message": "Note not found"
+        }), 404
+
+    return jsonify({
+        "status": "deleted",
+        "note": deleted_note
+    })
+
 
 @app.route("/notes/search", methods=["GET"])
 def search_notes_endpoint():

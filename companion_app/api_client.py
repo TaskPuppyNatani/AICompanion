@@ -66,6 +66,14 @@ def get_recent_notes():
     return response.json()
 
 
+def delete_note(note_index):
+    response = requests.delete(
+        f"{BASE_URL}/notes/{note_index}",
+        timeout=API_TIMEOUT_NOTE_SEC
+    )
+    return response.json()
+
+
 def search_notes(query):
     response = requests.get(
         f"{BASE_URL}/notes/search",

@@ -41,7 +41,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QPushButton,
-    QTextEdit
+    QListWidget,
+    QListWidgetItem,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer, QSize, QRectF
 from companion_app.local_notify_server import (
@@ -629,55 +630,129 @@ class Companion(QLabel):
         self.finalize_note_workflow(note_text)
 
     def view_notes_dialog(self):
-        try:
-            recent_notes = api_client.get_recent_notes()
-        except Exception as e:
-            print(f"View notes error: {e}")
-            notify("Could not load notes.")
-            return
-
         notes_dialog = QDialog(self)
-        notes_dialog.setWindowTitle("Recent Notes")
+        notes_dialog.setWindowTitle("Notes")
         notes_dialog.setModal(True)
 
         layout = QVBoxLayout(notes_dialog)
-        notes_text = QTextEdit(notes_dialog)
-        notes_text.setReadOnly(True)
+        notes_list = QListWidget(notes_dialog)
+        notes_list.setWordWrap(True)
 
-        if not isinstance(recent_notes, list) or not recent_notes:
-            notes_text.setPlainText("No recent notes.")
-        else:
-            entries = []
+        button_layout = QHBoxLayout()
+        delete_button = QPushButton("Delete")
+        close_button = QPushButton("Close")
+        delete_button.setEnabled(False)
+        button_layout.addWidget(delete_button)
+        button_layout.addWidget(close_button)
 
-            for note_entry in recent_notes:
-                if isinstance(note_entry, dict):
-                    category = note_entry.get("category", "No category")
-                    note_text_value = note_entry.get("note", "")
-                    timestamp = self.format_note_timestamp_for_display(
-                        note_entry.get("timestamp")
-                    )
-                else:
-                    category = "No category"
-                    note_text_value = note_entry
-                    timestamp = "No timestamp"
-
-                if not isinstance(category, str) or not category.strip():
-                    category = "No category"
-
-                if not isinstance(note_text_value, str):
-                    note_text_value = str(note_text_value)
-
-                entries.append(
-                    "\n".join([
-                        f"Category: {category}",
-                        f"Note: {note_text_value}",
-                        f"Timestamp: {timestamp}",
-                    ])
+        def format_note_item(note_entry):
+            if isinstance(note_entry, dict):
+                category = note_entry.get("category", "No category")
+                note_text_value = note_entry.get("note", "")
+                timestamp = self.format_note_timestamp_for_display(
+                    note_entry.get("timestamp")
                 )
+            else:
+                category = "No category"
+                note_text_value = note_entry
+                timestamp = "No timestamp"
 
-            notes_text.setPlainText("\n\n---\n\n".join(entries))
+            if not isinstance(category, str) or not category.strip():
+                category = "No category"
 
-        layout.addWidget(notes_text)
+            if not isinstance(note_text_value, str):
+                note_text_value = str(note_text_value)
+
+            return "\n".join([
+                f"Category: {category}",
+                f"Note: {note_text_value}",
+                f"Timestamp: {timestamp}",
+            ])
+
+        def update_delete_button():
+            current_item = notes_list.currentItem()
+            note_index = None
+
+            if current_item is not None:
+                note_index = current_item.data(Qt.ItemDataRole.UserRole)
+
+            delete_button.setEnabled(isinstance(note_index, int))
+
+        def load_note_items():
+            notes_list.clear()
+
+            try:
+                all_notes = api_client.get_notes()
+            except Exception as e:
+                print(f"View notes error: {e}")
+                notify("Could not load notes.")
+                delete_button.setEnabled(False)
+                return
+
+            if not isinstance(all_notes, list) or not all_notes:
+                empty_item = QListWidgetItem("No notes.")
+                empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
+                notes_list.addItem(empty_item)
+                delete_button.setEnabled(False)
+                return
+
+            for note_index in range(len(all_notes) - 1, -1, -1):
+                note_entry = all_notes[note_index]
+                item = QListWidgetItem(format_note_item(note_entry))
+                item.setData(Qt.ItemDataRole.UserRole, note_index)
+                notes_list.addItem(item)
+
+            update_delete_button()
+
+        def delete_selected_note():
+            current_item = notes_list.currentItem()
+
+            if current_item is None:
+                return
+
+            note_index = current_item.data(Qt.ItemDataRole.UserRole)
+
+            if not isinstance(note_index, int):
+                return
+
+            confirmation = QMessageBox.question(
+                notes_dialog,
+                "Delete Note",
+                "Delete the selected note?",
+                (
+                    QMessageBox.StandardButton.Yes
+                    | QMessageBox.StandardButton.No
+                ),
+                QMessageBox.StandardButton.No
+            )
+
+            if confirmation != QMessageBox.StandardButton.Yes:
+                return
+
+            try:
+                payload = api_client.delete_note(note_index)
+            except Exception as e:
+                print(f"Delete note error: {e}")
+                notify("Could not delete note.")
+                return
+
+            if payload.get("status") != "deleted":
+                notify("Could not delete note.")
+                return
+
+            notify("Note deleted.")
+            load_note_items()
+
+        delete_button.clicked.connect(delete_selected_note)
+        close_button.clicked.connect(notes_dialog.accept)
+        notes_list.currentItemChanged.connect(
+            lambda current, previous: update_delete_button()
+        )
+
+        load_note_items()
+
+        layout.addWidget(notes_list)
+        layout.addLayout(button_layout)
         notes_dialog.resize(520, 360)
         notes_dialog.exec()
 
