@@ -9,6 +9,7 @@ from pathlib import Path
 import requests
 from config import (
     AUDIO_DIR,
+    LOG_DIR,
     NOTIFY_SERVER_HOST,
     NOTIFY_SERVER_PORT,
     API_HOST,
@@ -77,6 +78,7 @@ speech_server_owned_by_companion = False
 SPEECH_HEALTHCHECK_URL = f"http://{API_HOST}:{API_PORT}/notes/recent"
 SPEECH_STARTUP_TIMEOUT_SEC = 45
 SPEECH_POLL_INTERVAL_SEC = 0.5
+SPEECH_STARTUP_LOG_MAX_CHARS = 8000
 
 AVATAR_MIN_SIZE = 64
 AVATAR_MAX_SIZE = 320
@@ -240,26 +242,103 @@ def probe_speech_server_ready(timeout=1.0):
 
 def launch_speech_server_process():
     speech_server_path = Path(__file__).resolve().parent / "speech_server.py"
+    cwd = speech_server_path.parent
 
     command = [
         sys.executable,
         str(speech_server_path),
     ]
 
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    stdout_path = LOG_DIR / "speech_server_startup_stdout.log"
+    stderr_path = LOG_DIR / "speech_server_startup_stderr.log"
+
+    launch_context = {
+        "command": command,
+        "python": sys.executable,
+        "cwd": str(cwd),
+        "speech_server_path": str(speech_server_path),
+        "stdout_path": stdout_path,
+        "stderr_path": stderr_path,
+    }
+
+    stdout_file = None
+    stderr_file = None
+
     try:
+        stdout_file = open(stdout_path, "w", encoding="utf-8", errors="replace")
+        stderr_file = open(stderr_path, "w", encoding="utf-8", errors="replace")
         process = subprocess.Popen(
             command,
-            cwd=str(speech_server_path.parent)
+            cwd=str(cwd),
+            stdout=stdout_file,
+            stderr=stderr_file,
         )
     except Exception as e:
         raise RuntimeError(
             f"Launch failed for command {command}: {e}"
         ) from e
+    finally:
+        if stdout_file is not None:
+            stdout_file.close()
 
-    return process, command
+        if stderr_file is not None:
+            stderr_file.close()
+
+    return process, launch_context
 
 
-def wait_for_speech_server_ready(timeout_seconds, poll_interval_seconds, process=None, probe_fn=probe_speech_server_ready):
+def read_speech_server_startup_log(path):
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace").strip()
+    except Exception as e:
+        return f"Could not read log file {path}: {e}"
+
+    if not text:
+        return "No output captured."
+
+    if len(text) > SPEECH_STARTUP_LOG_MAX_CHARS:
+        return "... [truncated]\n" + text[-SPEECH_STARTUP_LOG_MAX_CHARS:]
+
+    return text
+
+
+def format_speech_server_exit_diagnostic(launch_context, return_code):
+    command = launch_context.get("command", [])
+    stdout_path = launch_context.get("stdout_path")
+    stderr_path = launch_context.get("stderr_path")
+
+    return (
+        "Speech server exited during startup.\n\n"
+        "Command:\n"
+        f"{subprocess.list2cmdline(command)}\n\n"
+        "Python:\n"
+        f"{launch_context.get('python')}\n\n"
+        "Working directory:\n"
+        f"{launch_context.get('cwd')}\n\n"
+        "Speech server path:\n"
+        f"{launch_context.get('speech_server_path')}\n\n"
+        "Exit code:\n"
+        f"{return_code}\n\n"
+        "stderr:\n"
+        f"{read_speech_server_startup_log(stderr_path)}\n\n"
+        "stdout:\n"
+        f"{read_speech_server_startup_log(stdout_path)}"
+    )
+
+
+def format_speech_server_startup_failure(final_error):
+    if final_error and final_error.startswith("Speech server exited during startup."):
+        return final_error
+
+    return (
+        "Rivet could not confirm the speech server is ready.\n\n"
+        "Last probe error:\n"
+        f"{final_error or 'Timed out waiting for the speech server health check.'}"
+    )
+
+
+def wait_for_speech_server_ready(timeout_seconds, poll_interval_seconds, process=None, launch_context=None, probe_fn=probe_speech_server_ready):
     deadline = time.monotonic() + timeout_seconds
     last_error = None
 
@@ -268,6 +347,9 @@ def wait_for_speech_server_ready(timeout_seconds, poll_interval_seconds, process
             return_code = process.poll()
 
             if return_code is not None:
+                if launch_context is not None:
+                    return False, format_speech_server_exit_diagnostic(launch_context, return_code)
+
                 return False, f"Speech server exited with code {return_code}"
 
         is_ready, error = probe_fn()
@@ -1177,7 +1259,7 @@ class CompanionApplication:
             return
 
         try:
-            launched_process, command = launch_speech_server_process()
+            launched_process, launch_context = launch_speech_server_process()
         except RuntimeError as e:
             print(
                 "Speech server startup failed. "
@@ -1202,6 +1284,7 @@ class CompanionApplication:
             timeout_seconds=SPEECH_STARTUP_TIMEOUT_SEC,
             poll_interval_seconds=SPEECH_POLL_INTERVAL_SEC,
             process=launched_process,
+            launch_context=launch_context,
         )
 
         if is_ready_after_launch:
@@ -1211,7 +1294,7 @@ class CompanionApplication:
 
         print(
             "Speech server startup failed. "
-            f"Command: {command}. "
+            f"Command: {launch_context['command']}. "
             f"Final probe error: {final_error}"
         )
 
@@ -1220,10 +1303,7 @@ class CompanionApplication:
         QMessageBox.critical(
             None,
             "Speech Server Unavailable",
-            (
-                "Rivet could not start the speech server. "
-                "Please ensure dependencies are installed and try again."
-            )
+            format_speech_server_startup_failure(final_error)
         )
 
         raise RuntimeError("Speech server failed to start")
