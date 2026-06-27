@@ -1,6 +1,6 @@
 # Python cache
 __pycache__/
-*.pyc
+*.py[cod]
 
 # Virtual environment
 .venv/
@@ -14,8 +14,10 @@ __pycache__/
 # Runtime generated audio
 runtime/audio/*.wav
 
-# Runtime memory data
+# Runtime user data
 speech_data/memory.json
+speech_data/notes.json
+data/config/config.json
 
 # Windows junk
 Thumbs.db

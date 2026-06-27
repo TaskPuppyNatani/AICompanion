@@ -1,14 +1,16 @@
 import json
 from copy import deepcopy
 from pathlib import Path
-from config import CONFIG_DIR
-from config import OLLAMA_MODEL_NAME
+from config import ( OLLAMA_MODEL_NAME,
+                     AVATAR_IMAGE_PATH,
+                     CONFIG_DIR,
+                    )
 
 CONFIG_PATH = CONFIG_DIR / "config.json"
 LEGACY_CONFIG_PATH = Path(__file__).parent / "config.json"
 
 DEFAULT_CONFIG = {
-    "avatar": "lombax.png",
+    "avatar": AVATAR_IMAGE_PATH,
     "avatar_size": 150,
     "notification_duration": 5000,
     "voice_enabled": True,

@@ -57,3 +57,5 @@ STT_LANGUAGE = "en"
 TTS_LANG_CODE = "a"
 TTS_VOICE = "af_heart"
 TTS_SAMPLE_RATE = 24000
+
+AVATAR_IMAGE_PATH = "assets/avatars/default.png"
