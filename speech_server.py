@@ -98,6 +98,37 @@ def delete_note(note_index):
     return deleted_note
 
 
+def update_note(note_index, note_text, category=None):
+    if not isinstance(note_text, str) or not note_text.strip():
+        return None, "empty"
+
+    notes = load_notes()
+
+    if not isinstance(note_index, int):
+        return None, "not_found"
+
+    if note_index < 0 or note_index >= len(notes):
+        return None, "not_found"
+
+    existing_note = notes[note_index]
+
+    if isinstance(existing_note, dict):
+        updated_note = dict(existing_note)
+    else:
+        updated_note = {}
+
+    updated_note["note"] = note_text.strip()
+
+    if isinstance(category, str) and category.strip():
+        updated_note["category"] = category.strip()
+    else:
+        updated_note.pop("category", None)
+
+    notes[note_index] = updated_note
+    save_notes(notes)
+    return updated_note, None
+
+
 def get_latest_note():
     notes = load_notes()
 
@@ -430,6 +461,32 @@ def delete_note_endpoint(note_index):
     return jsonify({
         "status": "deleted",
         "note": deleted_note
+    })
+
+
+@app.route("/notes/<int:note_index>", methods=["PUT"])
+def update_note_endpoint(note_index):
+    data = request.json or {}
+    note_text = data.get("note")
+    category = data.get("category")
+
+    updated_note, error = update_note(note_index, note_text, category)
+
+    if error == "empty":
+        return jsonify({
+            "status": "error",
+            "message": "No note provided"
+        }), 400
+
+    if error == "not_found":
+        return jsonify({
+            "status": "error",
+            "message": "Note not found"
+        }), 404
+
+    return jsonify({
+        "status": "updated",
+        "note": updated_note
     })
 
 

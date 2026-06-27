@@ -74,6 +74,22 @@ def delete_note(note_index):
     return response.json()
 
 
+def update_note(note_index, note, category=None):
+    payload = {
+        "note": note
+    }
+
+    if category:
+        payload["category"] = category
+
+    response = requests.put(
+        f"{BASE_URL}/notes/{note_index}",
+        json=payload,
+        timeout=API_TIMEOUT_NOTE_SEC
+    )
+    return response.json()
+
+
 def search_notes(query):
     response = requests.get(
         f"{BASE_URL}/notes/search",

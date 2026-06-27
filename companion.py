@@ -43,6 +43,8 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QListWidget,
     QListWidgetItem,
+    QLineEdit,
+    QTextEdit,
 )
 from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer, QSize, QRectF
 from companion_app.local_notify_server import (
@@ -629,6 +631,76 @@ class Companion(QLabel):
 
         self.finalize_note_workflow(note_text)
 
+    def note_editor_dialog(self, title="Note Editor", note_entry=None):
+        editor_dialog = QDialog(self)
+        editor_dialog.setWindowTitle(title)
+        editor_dialog.setModal(True)
+
+        layout = QVBoxLayout(editor_dialog)
+
+        note_text = QTextEdit(editor_dialog)
+        category_input = QLineEdit(editor_dialog)
+        category_input.setPlaceholderText("Category (optional)")
+
+        if isinstance(note_entry, dict):
+            note_value = note_entry.get("note", "")
+            category_value = note_entry.get("category", "")
+        elif note_entry is None:
+            note_value = ""
+            category_value = ""
+        else:
+            note_value = str(note_entry)
+            category_value = ""
+
+        note_text.setPlainText(
+            note_value if isinstance(note_value, str) else str(note_value)
+        )
+        category_input.setText(
+            category_value if isinstance(category_value, str) else ""
+        )
+
+        button_layout = QHBoxLayout()
+        save_button = QPushButton("Save")
+        cancel_button = QPushButton("Cancel")
+        button_layout.addWidget(save_button)
+        button_layout.addWidget(cancel_button)
+
+        result = {
+            "accepted": False,
+            "note": "",
+            "category": "",
+        }
+
+        def save_note_edits():
+            edited_note = note_text.toPlainText().strip()
+
+            if not edited_note:
+                QMessageBox.warning(
+                    editor_dialog,
+                    "Note Editor",
+                    "Note text is required."
+                )
+                return
+
+            result["accepted"] = True
+            result["note"] = edited_note
+            result["category"] = category_input.text().strip()
+            editor_dialog.accept()
+
+        save_button.clicked.connect(save_note_edits)
+        cancel_button.clicked.connect(editor_dialog.reject)
+
+        layout.addWidget(QLabel("Note:", editor_dialog))
+        layout.addWidget(note_text)
+        layout.addWidget(QLabel("Category:", editor_dialog))
+        layout.addWidget(category_input)
+        layout.addLayout(button_layout)
+
+        editor_dialog.resize(420, 260)
+        editor_dialog.exec()
+
+        return result["note"], result["category"], result["accepted"]
+
     def view_notes_dialog(self):
         notes_dialog = QDialog(self)
         notes_dialog.setWindowTitle("Notes")
@@ -639,9 +711,12 @@ class Companion(QLabel):
         notes_list.setWordWrap(True)
 
         button_layout = QHBoxLayout()
+        edit_button = QPushButton("Edit")
         delete_button = QPushButton("Delete")
         close_button = QPushButton("Close")
+        edit_button.setEnabled(False)
         delete_button.setEnabled(False)
+        button_layout.addWidget(edit_button)
         button_layout.addWidget(delete_button)
         button_layout.addWidget(close_button)
 
@@ -676,7 +751,9 @@ class Companion(QLabel):
             if current_item is not None:
                 note_index = current_item.data(Qt.ItemDataRole.UserRole)
 
-            delete_button.setEnabled(isinstance(note_index, int))
+            has_note_selection = isinstance(note_index, int)
+            edit_button.setEnabled(has_note_selection)
+            delete_button.setEnabled(has_note_selection)
 
         def load_note_items():
             notes_list.clear()
@@ -686,6 +763,7 @@ class Companion(QLabel):
             except Exception as e:
                 print(f"View notes error: {e}")
                 notify("Could not load notes.")
+                edit_button.setEnabled(False)
                 delete_button.setEnabled(False)
                 return
 
@@ -693,6 +771,7 @@ class Companion(QLabel):
                 empty_item = QListWidgetItem("No notes.")
                 empty_item.setFlags(Qt.ItemFlag.NoItemFlags)
                 notes_list.addItem(empty_item)
+                edit_button.setEnabled(False)
                 delete_button.setEnabled(False)
                 return
 
@@ -700,9 +779,48 @@ class Companion(QLabel):
                 note_entry = all_notes[note_index]
                 item = QListWidgetItem(format_note_item(note_entry))
                 item.setData(Qt.ItemDataRole.UserRole, note_index)
+                item.setData(Qt.ItemDataRole.UserRole + 1, note_entry)
                 notes_list.addItem(item)
 
             update_delete_button()
+
+        def edit_selected_note():
+            current_item = notes_list.currentItem()
+
+            if current_item is None:
+                return
+
+            note_index = current_item.data(Qt.ItemDataRole.UserRole)
+            note_entry = current_item.data(Qt.ItemDataRole.UserRole + 1)
+
+            if not isinstance(note_index, int):
+                return
+
+            edited_note, edited_category, accepted = self.note_editor_dialog(
+                title="Edit Note",
+                note_entry=note_entry
+            )
+
+            if not accepted:
+                return
+
+            try:
+                payload = api_client.update_note(
+                    note_index,
+                    edited_note,
+                    edited_category
+                )
+            except Exception as e:
+                print(f"Update note error: {e}")
+                notify("Could not update note.")
+                return
+
+            if payload.get("status") != "updated":
+                notify("Could not update note.")
+                return
+
+            notify("Note updated.")
+            load_note_items()
 
         def delete_selected_note():
             current_item = notes_list.currentItem()
@@ -743,6 +861,7 @@ class Companion(QLabel):
             notify("Note deleted.")
             load_note_items()
 
+        edit_button.clicked.connect(edit_selected_note)
         delete_button.clicked.connect(delete_selected_note)
         close_button.clicked.connect(notes_dialog.accept)
         notes_list.currentItemChanged.connect(
