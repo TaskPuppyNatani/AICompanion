@@ -1,19 +1,29 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from config import (
     LLAMA_CPP_COMPLETION_URL,
+    LLAMA_CPP_DEFAULT_MODEL,
     LLAMA_CPP_HEALTH_URL,
+    LLAMA_CPP_HOST,
+    LLAMA_CPP_MODELS_DIR,
+    LLAMA_CPP_PORT,
     LLAMA_CPP_REQUEST_TIMEOUT_SEC,
+    LLAMA_CPP_SERVER_EXE_PATH,
 )
 from speech_data.providers.base import LLMProvider
 
 
 class LlamaCppProvider(LLMProvider):
     """Provider for an externally managed llama.cpp llama-server."""
+
+    def __init__(self):
+        super().__init__()
+        self.process = None
 
     def health_check(self) -> bool:
         try:
@@ -23,8 +33,43 @@ class LlamaCppProvider(LLMProvider):
             return False
 
     def start(self) -> None:
-        """llama-server is externally managed for now."""
-        return
+        model_path = LLAMA_CPP_MODELS_DIR / LLAMA_CPP_DEFAULT_MODEL
+
+        if not LLAMA_CPP_SERVER_EXE_PATH.is_file():
+            raise RuntimeError(
+                f"llama-server executable not found: {LLAMA_CPP_SERVER_EXE_PATH}"
+            )
+
+        if not LLAMA_CPP_MODELS_DIR.is_dir():
+            raise RuntimeError(
+                f"llama.cpp models directory not found: {LLAMA_CPP_MODELS_DIR}"
+            )
+
+        if not model_path.is_file():
+            raise RuntimeError(
+                f"llama.cpp model not found: {model_path}"
+            )
+
+        command = [
+            str(LLAMA_CPP_SERVER_EXE_PATH),
+            "-m",
+            str(model_path),
+            "--host",
+            LLAMA_CPP_HOST,
+            "--port",
+            str(LLAMA_CPP_PORT),
+        ]
+
+        try:
+            self.process = subprocess.Popen(
+                command,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Launch failed for command {command}: {e}") from e
+
+        self.started_by_companion = True
 
     def stop(self) -> None:
         """llama-server shutdown is intentionally not managed yet."""
