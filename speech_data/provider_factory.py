@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from speech_data.providers.base import LLMProvider
+from speech_data.providers.llama_cpp_provider import LlamaCppProvider
 from speech_data.providers.ollama_provider import OllamaProvider
 
 ACTIVE_PROVIDER_NAME = "ollama"
@@ -17,6 +18,9 @@ def get_active_provider() -> LLMProvider:
 
     if provider_name == "ollama":
         return OllamaProvider()
+
+    if provider_name == "llama_cpp":
+        return LlamaCppProvider()
 
     print(
         "[MODEL] Unknown provider "
