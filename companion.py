@@ -1,6 +1,4 @@
 import sys
-import shutil
-import os
 import winsound
 import random
 import threading
@@ -15,9 +13,6 @@ from config import (
     NOTIFY_SERVER_PORT,
     API_HOST,
     API_PORT,
-    OLLAMA_HOST,
-    OLLAMA_PORT,
-    OLLAMA_HEALTH_URL,
 )
 
 
@@ -68,7 +63,7 @@ from config_store import (
 )
 from companion_app import api_client, note_workflow
 from companion_app import voice_capture
-from speech_data.provider_factory import get_active_provider_name
+from speech_data.provider_factory import get_active_provider
 
 app = None
 label = None
@@ -83,8 +78,6 @@ SPEECH_HEALTHCHECK_URL = f"http://{API_HOST}:{API_PORT}/notes/recent"
 SPEECH_STARTUP_TIMEOUT_SEC = 45
 SPEECH_POLL_INTERVAL_SEC = 0.5
 
-OLLAMA_STARTUP_TIMEOUT_SEC = 15
-OLLAMA_FALLBACK_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "Ollama" / "ollama.exe"
 AVATAR_MIN_SIZE = 64
 AVATAR_MAX_SIZE = 320
 AVATAR_RESIZE_STEP = 8
@@ -220,41 +213,6 @@ notifications = [
     "Ratchet reports all services healthy.",
     "Container restarted successfully.",
 ]
-
-
-def probe_ollama_ready(timeout=1.0):
-    try:
-        response = requests.get(OLLAMA_HEALTH_URL, timeout=timeout)
-        return response.status_code == 200, None
-    except Exception as e:
-        return False, f"Request failed: {e}"
-
-
-def _find_ollama_exe():
-    found = shutil.which("ollama")
-    if found:
-        return Path(found)
-    if OLLAMA_FALLBACK_EXE.is_file():
-        return OLLAMA_FALLBACK_EXE
-    return None
-
-
-def launch_ollama_process():
-    exe = _find_ollama_exe()
-    if exe is None:
-        raise RuntimeError("ollama executable not found on PATH or fallback location")
-
-    command = [str(exe), "serve"]
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except Exception as e:
-        raise RuntimeError(f"Launch failed for command {command}: {e}") from e
-
-    return process, command
 
 
 def probe_speech_server_ready(timeout=1.0):
@@ -1203,63 +1161,8 @@ class CompanionApplication:
         register_notify_callback(bridge.notify_signal.emit)
 
     def _ensure_active_provider_ready(self):
-        active_provider = get_active_provider_name()
-
-        if active_provider == "ollama":
-            self._ensure_ollama_ready()
-            return
-
-        if active_provider == "llama_cpp":
-            print("llama.cpp provider selected; llama-server is externally managed.")
-            return
-
-        print(
-            "Unknown LLM provider "
-            f"'{active_provider}'; falling back to Ollama startup."
-        )
-        self._ensure_ollama_ready()
-
-    def _ensure_ollama_ready(self):
-        is_ready, _ = probe_ollama_ready()
-        if is_ready:
-            print("Ollama already running; no launch needed.")
-            return
-
-        try:
-            launched_process, command = launch_ollama_process()
-        except RuntimeError as e:
-            print(f"Ollama launch failed: {e}")
-            QMessageBox.warning(
-                None,
-                "Ollama Unavailable",
-                (
-                    "Rivet could not start Ollama. "
-                    "Please start Ollama manually and try again."
-                )
-            )
-            raise RuntimeError("Ollama failed to launch") from e
-
-        is_ready_after_launch, final_error = wait_for_speech_server_ready(
-            timeout_seconds=OLLAMA_STARTUP_TIMEOUT_SEC,
-            poll_interval_seconds=SPEECH_POLL_INTERVAL_SEC,
-            process=launched_process,
-            probe_fn=probe_ollama_ready,
-        )
-
-        if is_ready_after_launch:
-            print("Ollama started by companion (unowned).")
-            return
-
-        print(f"Ollama did not become ready in time. Last error: {final_error}")
-        QMessageBox.warning(
-            None,
-            "Ollama Unavailable",
-            (
-                "Rivet could not confirm Ollama is running. "
-                "Please start Ollama manually and try again."
-            )
-        )
-        raise RuntimeError("Ollama failed to become ready")
+        provider = get_active_provider()
+        provider.ensure_running()
 
     def _ensure_speech_server_ready(self):
         global speech_server_process

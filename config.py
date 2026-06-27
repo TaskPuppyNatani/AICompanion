@@ -37,6 +37,10 @@ LLAMA_CPP_COMPLETION_URL = (
     f"http://{LLAMA_CPP_HOST}:{LLAMA_CPP_PORT}/completion"
 )
 
+LLAMA_CPP_HEALTH_URL = (
+    f"http://{LLAMA_CPP_HOST}:{LLAMA_CPP_PORT}/health"
+)
+
 OLLAMA_MODEL_NAME = "phi4-mini:latest"
 
 NOTIFY_SERVER_HOST = "127.0.0.1"
