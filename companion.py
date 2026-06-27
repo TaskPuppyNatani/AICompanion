@@ -68,6 +68,7 @@ from config_store import (
 )
 from companion_app import api_client, note_workflow
 from companion_app import voice_capture
+from speech_data.provider_factory import get_active_provider_name
 
 app = None
 label = None
@@ -1185,7 +1186,7 @@ class CompanionApplication:
         app = QApplication(sys.argv)
         self.app = app
 
-        self._ensure_ollama_ready()
+        self._ensure_active_provider_ready()
         self._ensure_speech_server_ready()
 
         self._wire_notification_callbacks()
@@ -1200,6 +1201,23 @@ class CompanionApplication:
     def _wire_notification_callbacks(self):
         bridge.notify_signal.connect(notify)
         register_notify_callback(bridge.notify_signal.emit)
+
+    def _ensure_active_provider_ready(self):
+        active_provider = get_active_provider_name()
+
+        if active_provider == "ollama":
+            self._ensure_ollama_ready()
+            return
+
+        if active_provider == "llama_cpp":
+            print("llama.cpp provider selected; llama-server is externally managed.")
+            return
+
+        print(
+            "Unknown LLM provider "
+            f"'{active_provider}'; falling back to Ollama startup."
+        )
+        self._ensure_ollama_ready()
 
     def _ensure_ollama_ready(self):
         is_ready, _ = probe_ollama_ready()

@@ -22,3 +22,9 @@ data/config/config.json
 # Windows junk
 Thumbs.db
 Desktop.ini
+
+# llama
+llama/
+
+# models
+models/

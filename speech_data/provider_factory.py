@@ -4,7 +4,7 @@ from speech_data.providers.base import LLMProvider
 from speech_data.providers.llama_cpp_provider import LlamaCppProvider
 from speech_data.providers.ollama_provider import OllamaProvider
 
-ACTIVE_PROVIDER_NAME = "ollama"
+ACTIVE_PROVIDER_NAME = "llama_cpp"  # Change to "ollama" to use Ollama provider instead of LlamaCpp
 
 
 def get_active_provider_name() -> str:

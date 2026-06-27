@@ -46,11 +46,6 @@ except Exception:
 
 app = Flask(__name__)
 
-#PERSONALITY_FILE = Path("speech_data/personality.md")
-
-#NOTES_FILE = Path(__file__).parent / "notes.json"
-
-#STT_MODEL_NAME = "small.en"
 stt_model = None
 stt_model_lock = threading.Lock()
 
