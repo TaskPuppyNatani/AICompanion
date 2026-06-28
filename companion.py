@@ -414,15 +414,29 @@ def ask_ratchet(event="click", sender=None):
         return "Ratchet seems to be thinking too hard right now."
 
 
+INTERACTION_NOT_STARTED = object()
+
+
 class InteractionManager:
     def __init__(self):
         self.active_interaction = None
 
     @property
-    def is_interacting(self):
+    def current_interaction(self):
+        return self.active_interaction
+
+    @property
+    def is_busy(self):
         return self.active_interaction is not None
 
-    def execute_interaction(self, kind, handler, *args, **metadata):
+    @property
+    def is_interacting(self):
+        return self.is_busy
+
+    def begin_interaction(self, kind, **metadata):
+        if self.is_busy:
+            return False
+
         interaction = {
             "kind": kind,
             "started_at": datetime.now().isoformat(),
@@ -430,11 +444,19 @@ class InteractionManager:
         interaction.update(metadata)
 
         self.active_interaction = interaction
+        return True
+
+    def end_interaction(self):
+        self.active_interaction = None
+
+    def execute_interaction(self, kind, handler, *args, **metadata):
+        if not self.begin_interaction(kind, **metadata):
+            return INTERACTION_NOT_STARTED
 
         try:
             return handler(*args)
         finally:
-            self.active_interaction = None
+            self.end_interaction()
 
 
 interaction_manager = InteractionManager()
@@ -1161,6 +1183,9 @@ class Companion(QLabel):
         self.last_click = time.time()
 
         phrase = interaction_manager.execute_interaction("ai_click", ask_ratchet)
+
+        if phrase is INTERACTION_NOT_STARTED:
+            return
 
         print(phrase)
 
