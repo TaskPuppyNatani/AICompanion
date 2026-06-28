@@ -11,8 +11,9 @@ __pycache__/
 # Continue extension workspace
 .continue/
 
-# Runtime generated audio
+# Runtime output
 runtime/audio/*.wav
+runtime/logs/
 
 # Runtime user data
 speech_data/memory.json

@@ -1,5 +1,4 @@
 from flask import Flask, request, send_file, jsonify
-from kokoro import KPipeline
 import soundfile as sf
 import tempfile
 import random
@@ -48,6 +47,57 @@ app = Flask(__name__)
 
 stt_model = None
 stt_model_lock = threading.Lock()
+
+
+class LazyComponent:
+    """Thread-safe lazy initialization for reusable long-lived components.
+
+    This helper is intentionally generic so components such as Kokoro, Whisper,
+    Vision, or OCR can adopt the same pattern without component-specific logic.
+    """
+
+    NOT_INITIALIZED = "not_initialized"
+    INITIALIZING = "initializing"
+    READY = "ready"
+    FAILED = "failed"
+
+    def __init__(self, initializer):
+        self.initializer = initializer
+        self.state = self.NOT_INITIALIZED
+        self.instance = None
+        self.error = None
+        self.lock = threading.Lock()
+
+    @property
+    def ready(self):
+        return self.state == self.READY
+
+    def get(self):
+        if self.ready:
+            return self.instance
+
+        if self.state == self.FAILED:
+            raise self.error
+
+        with self.lock:
+            if self.ready:
+                return self.instance
+
+            if self.state == self.FAILED:
+                raise self.error
+
+            self.state = self.INITIALIZING
+
+            try:
+                self.instance = self.initializer()
+            except Exception as e:
+                self.error = e
+                self.state = self.FAILED
+                raise
+
+            self.state = self.READY
+            return self.instance
+
 
 def load_notes():
 
@@ -237,11 +287,16 @@ def save_memory(memory):
         json.dump(memory, f, indent=4)
 
 
-print("Loading Kokoro...")
+def create_tts_pipeline():
+    from kokoro import KPipeline
 
-pipeline = KPipeline(lang_code=TTS_LANG_CODE)
+    print("Loading Kokoro...")
+    pipeline = KPipeline(lang_code=TTS_LANG_CODE)
+    print("Kokoro ready.")
+    return pipeline
 
-print("Kokoro ready.")
+
+tts_component = LazyComponent(create_tts_pipeline)
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -626,6 +681,15 @@ def speak():
     )
 
     print(f"Generating: {text}")
+
+    try:
+        pipeline = tts_component.get()
+    except Exception as e:
+        print(f"TTS initialization error: {e}")
+        return jsonify({
+            "status": "error",
+            "message": "TTS is unavailable"
+        }), 503
 
     generator = pipeline(
         text,
