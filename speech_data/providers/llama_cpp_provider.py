@@ -19,7 +19,7 @@ from speech_data.providers.base import LLMProvider
 
 
 class LlamaCppProvider(LLMProvider):
-    """Provider for an externally managed llama.cpp llama-server."""
+    """Provider for a local llama.cpp llama-server backend."""
 
     def __init__(self):
         super().__init__()

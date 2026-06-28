@@ -1,27 +1,19 @@
-"""Server-side LLM service placeholder for future local model integration.
+"""Server-side LLM service for provider-backed text generation.
 
-This module defines a single integration point for future AI response generation
-inside the speech server layer. The implementation is intentionally inert for
-now and returns no generated text.
+This module keeps prompt construction in one place and routes generation through
+the active provider selected by the provider factory.
 """
 
 from __future__ import annotations
 
+import re
 from typing import Any
+
 from speech_data.provider_factory import get_active_provider
 
 
-#OLLAMA_GENERATE_URL = "http://127.0.0.1:11434/api/generate"
-#OLLAMA_MODEL_NAME = "phi4-mini:latest"
-
-
 class LLMService:
-    """Placeholder service for future server-side LLM integration.
-
-    The speech server will eventually call this service to request model-based
-    responses. Until model integration is added, every generation method returns
-    ``None`` to preserve current deterministic behavior.
-    """
+    """Build prompts and request responses from the active LLM provider."""
 
     def build_context(
         self,
@@ -48,17 +40,51 @@ class LLMService:
             },
         }
 
-    def generate_ollama_response(self, prompt: str) -> str | None:
-        """Send a minimal prompt request to Ollama and return generated text.
-
-        This helper is intentionally not wired into existing response methods,
-        so current fallback behavior remains unchanged.
-        """
+    def generate_provider_response(self, prompt: str) -> str | None:
+        """Send a prompt to the active provider and return generated text."""
         provider = get_active_provider()
         return provider.generate_text(prompt)
 
+    def is_plain_click_response(self, text: str | None) -> bool:
+        """Return whether text is acceptable for an AI click bubble."""
+        if not text or not text.strip():
+            return False
+
+        candidate = text.strip()
+        lines = [line.strip() for line in candidate.splitlines() if line.strip()]
+        if len(lines) != 1:
+            return False
+
+        line = lines[0]
+        lowered = line.lower()
+
+        if "`" in line or "```" in line:
+            return False
+
+        if line.startswith(("-", "*", "#", ">")):
+            return False
+
+        if re.match(r"^(rivet|assistant|response|reply)\s*:", lowered):
+            return False
+
+        code_patterns = (
+            r"\bdef\s+\w+\s*\(",
+            r"\bclass\s+\w+",
+            r"\breturn\b",
+            r"\bimport\b",
+            r"\bfrom\s+\S+\s+import\b",
+            r"\bprint\s*\(",
+        )
+        if any(re.search(pattern, lowered) for pattern in code_patterns):
+            return False
+
+        if "{" in line or "}" in line or '"""' in line:
+            return False
+
+        return True
+
     def generate_click_response(self, context: dict[str, Any]) -> str | None:
-        """Generate an experimental click response via Ollama."""
+        """Generate a click response via the active provider."""
         try:
             personality = str(context.get("personality", "") or "").strip()
             click_count = int(context.get("click_count", 0) or 0)
@@ -89,12 +115,16 @@ class LLMService:
             "- Keep it concise.\n"
             "- Stay in-character as Rivet.\n"
             "- Keep tone friendly and playful.\n"
-            "- No roleplay formatting.\n"
-            "- No markdown.\n"
-            "Return only the response sentence."
+            "- Plain conversational dialogue only.\n"
+            "- Do not write code, examples, function definitions, labels, explanations, Markdown, or code fences.\n"
+            "- Do not wrap the response in quotes.\n"
+            "Return only one short spoken line from Rivet."
         )
 
-        return self.generate_ollama_response(prompt)
+        response = self.generate_provider_response(prompt)
+        if not self.is_plain_click_response(response):
+            return None
+        return response.strip()
 
     def generate_memory_response(self, context: dict[str, Any]) -> str | None:
         """Future memory-aware response generation hook.

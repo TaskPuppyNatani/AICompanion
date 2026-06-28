@@ -21,7 +21,7 @@ OLLAMA_FALLBACK_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "O
 
 
 class OllamaProvider(LLMProvider):
-    """Current production provider using Ollama generate API."""
+    """Provider for an Ollama generate API backend."""
 
     def __init__(self):
         super().__init__()

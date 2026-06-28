@@ -1,4 +1,6 @@
 from flask import Flask, request, send_file, jsonify
+import numpy as np
+import re
 import soundfile as sf
 import tempfile
 import random
@@ -297,6 +299,87 @@ def create_tts_pipeline():
 
 
 tts_component = LazyComponent(create_tts_pipeline)
+
+
+TTS_PROSE_FENCE_TAGS = {"", "text", "txt", "plain", "plaintext"}
+TTS_CODE_FENCE_TAGS = {
+    "python",
+    "py",
+    "json",
+    "javascript",
+    "js",
+    "typescript",
+    "ts",
+    "html",
+    "css",
+    "bash",
+    "sh",
+    "powershell",
+    "ps1",
+    "xml",
+    "yaml",
+    "yml",
+    "sql",
+}
+
+
+def normalize_fence_tag(fence_line):
+    return fence_line.strip()[3:].strip().lower()
+
+
+def sanitize_tts_text(text):
+    lines = str(text or "").splitlines()
+    sanitized_lines = []
+    inside_fenced_block = False
+    fence_tag = ""
+    fenced_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            if inside_fenced_block:
+                if fence_tag in TTS_PROSE_FENCE_TAGS:
+                    sanitized_lines.extend(fenced_lines)
+
+                inside_fenced_block = False
+                fence_tag = ""
+                fenced_lines = []
+            else:
+                inside_fenced_block = True
+                fence_tag = normalize_fence_tag(stripped)
+                fenced_lines = []
+
+            continue
+
+        if inside_fenced_block:
+            fenced_lines.append(line)
+            continue
+
+        if re.fullmatch(r"-{3,}", stripped):
+            continue
+
+        sanitized_lines.append(line)
+
+    return "\n".join(sanitized_lines).strip()
+
+
+def audio_segment_to_array(audio):
+    if audio is None:
+        return None
+
+    if hasattr(audio, "detach"):
+        audio = audio.detach().cpu().numpy()
+    else:
+        audio = np.asarray(audio)
+
+    audio = np.asarray(audio).squeeze()
+
+    if audio.size == 0:
+        return None
+
+    return audio.reshape(-1)
+
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -672,6 +755,7 @@ def set_active_model_profile_endpoint():
 
 @app.route("/speak", methods=["POST"])
 def speak():
+    print("=== ENTERED /SPEAK ===", flush=True)
 
     data = request.json
 
@@ -680,7 +764,8 @@ def speak():
         "Hello Pup."
     )
 
-    print(f"Generating: {text}")
+    print(f"Generating: {text}", flush=True)
+    tts_text = sanitize_tts_text(text)
 
     try:
         pipeline = tts_component.get()
@@ -692,7 +777,7 @@ def speak():
         }), 503
 
     generator = pipeline(
-        text,
+        tts_text,
         voice=TTS_VOICE
     )
 
@@ -700,13 +785,44 @@ def speak():
         suffix=".wav",
         delete=False
     )
+    audio_file.close()
+
+    chunk_count = 0
+    audio_segments = []
 
     for _, _, audio in generator:
-        sf.write(
-            audio_file.name,
-            audio,
-            TTS_SAMPLE_RATE
+        chunk_count += 1
+        audio_segment = audio_segment_to_array(audio)
+
+        if audio_segment is None:
+            print(f"TTS chunk {chunk_count}: no audio samples")
+            continue
+
+        audio_segments.append(audio_segment)
+        print(
+            f"TTS chunk {chunk_count}: "
+            f"{len(audio_segment)} samples "
+            f"({len(audio_segment) / TTS_SAMPLE_RATE:.2f} seconds)"
         )
+
+    print(f"TTS generator finished after {chunk_count} chunk(s)")
+
+    if not audio_segments:
+        return jsonify({
+            "status": "error",
+            "message": "TTS generated no audio"
+        }), 500
+
+    if len(audio_segments) == 1:
+        combined_audio = audio_segments[0]
+    else:
+        combined_audio = np.concatenate(audio_segments)
+
+    sf.write(
+        audio_file.name,
+        combined_audio,
+        TTS_SAMPLE_RATE
+    )
 
     return send_file(
         audio_file.name,

@@ -13,10 +13,15 @@ This file tracks the **runtime dependencies required for Rivet to function**, wi
 
 ## Current LLM Backend
 
-* **Ollama 0.30.x**
-* Current default model:
+* Provider-based LLM backend
+* Current active provider in development:
 
-  * `phi4-mini:latest`
+  * `llama_cpp`
+  * `models/gemma3.gguf`
+
+* Supported fallback provider:
+
+  * **Ollama 0.30.x**
 
 ## Current Runtime Entry Points
 
@@ -67,10 +72,11 @@ Used by Rivet’s local speech and chat service flow.
 
 ## C. LLM generation
 
-Current provider path still uses **Ollama** as the active backend.
+LLM generation is routed through the provider abstraction.
 
+* **llama.cpp** via local `llama-server`
 * **Ollama 0.30.x**
-* active configured model profile target (currently defaults to `phi4-mini:latest`)
+* active provider selected in `speech_data/provider_factory.py`
 
 ## D. TTS
 
@@ -97,8 +103,8 @@ Requires:
 
 * Rivet Python environment
 * Flask speech server path working
-* Ollama reachable
-* active model profile resolves to a valid Ollama model
+* active LLM provider reachable
+* active provider model available
 
 ## Speech / spoken output
 
@@ -127,9 +133,10 @@ If `sounddevice` is missing, voice note capture will fail with the runtime messa
 This reflects the currently known working stack in the project as of the latest Rivet work:
 
 * **Ollama**: `0.30.x`
+* **llama.cpp**: local `llama-server`
 * **faster-whisper**: `1.2.1`
 * **kokoro**: `0.9.4`
-* **default model**: `phi4-mini:latest`
+* **default llama.cpp model**: `models/gemma3.gguf`
 
 Additional confirmed runtime package requirement for voice notes:
 
@@ -145,14 +152,13 @@ Rivet currently uses:
 
 * Rivet UI / companion app
 * local speech server
-* Ollama backend for text generation
+* provider-backed text generation
 * model profile system for selecting the active model
+* lazy TTS initialization through the speech server
 
-## In-progress architecture direction
+## Provider architecture
 
-Rivet is being refactored toward an **LLM provider abstraction layer** so that Ollama can later be replaced with a more self-contained backend, likely based on **llama.cpp**.
-
-That means this dependency list should be treated as the **current Ollama-era runtime dependency list**, not the final long-term portable dependency target.
+Rivet now uses an **LLM provider abstraction layer**. The current portable path uses **llama.cpp**, while **Ollama** remains a supported provider.
 
 ---
 
@@ -182,9 +188,10 @@ This dependency file should be updated whenever:
 When Rivet changes, update this file if any of the following happen:
 
 * Ollama version changes
+* llama.cpp version changes
 * default model changes
 * Kokoro version changes
 * faster-whisper version changes
 * a new voice/audio dependency is added
-* Ollama is replaced by llama.cpp or another backend
+* the active provider changes
 * runtime packaging changes for portable/self-contained deployment

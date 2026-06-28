@@ -53,7 +53,6 @@ from companion_app.windows_notification_listener import (
     stop_windows_notification_listener,
 )
 
-from config import NOTIFY_SERVER_HOST
 from config_store import (
     config,
     saved_avatar_position,
@@ -192,22 +191,6 @@ class ThoughtBubbleWidget(QWidget):
 
         painter.setPen(QColor("black"))
         painter.drawText(text_rect, self._text, text_option)
-
-responses = [
-    "Hello Pup.",
-    "How are you doing?",
-    "Ratchet seems quiet today.",
-    "Rivet seems to be fine.",
-    "No emergencies detected.",
-    "All systems nominal.",
-]
-
-startup_responses = [
-    "Hello Pup.",
-    "Good evening Pup.",
-    "Nice to see you again.",
-    "Systems online.",
-]
 
 notifications = [
     "New email received.",
@@ -429,7 +412,34 @@ def ask_ratchet(event="click", sender=None):
     except Exception as e:
         print(f"Chat error: {e}")
         return "Ratchet seems to be thinking too hard right now."
-        
+
+
+class InteractionManager:
+    def __init__(self):
+        self.active_interaction = None
+
+    @property
+    def is_interacting(self):
+        return self.active_interaction is not None
+
+    def execute_interaction(self, kind, handler, *args, **metadata):
+        interaction = {
+            "kind": kind,
+            "started_at": datetime.now().isoformat(),
+        }
+        interaction.update(metadata)
+
+        self.active_interaction = interaction
+
+        try:
+            return handler(*args)
+        finally:
+            self.active_interaction = None
+
+
+interaction_manager = InteractionManager()
+
+
 def notify(message):
     print(f"NOTIFICATION: {message}")
 
@@ -1150,7 +1160,7 @@ class Companion(QLabel):
 
         self.last_click = time.time()
 
-        phrase = ask_ratchet()
+        phrase = interaction_manager.execute_interaction("ai_click", ask_ratchet)
 
         print(phrase)
 
