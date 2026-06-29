@@ -44,7 +44,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QTextEdit,
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, QTimer, QSize, QRectF
+from PyQt6.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QThread, QTimer, QSize, QRectF
 from companion_app.local_notify_server import (
     register_notify_callback,
     start_notification_server,
@@ -447,6 +447,7 @@ def speak(message):
         speaking = False
 
 def ask_ratchet(event="click", sender=None, interaction_data=None):
+    start_time = time.perf_counter()
     try:
         response = api_client.chat(event, sender, interaction_data=interaction_data)
 
@@ -455,14 +456,43 @@ def ask_ratchet(event="click", sender=None, interaction_data=None):
     except Exception as e:
         print(f"Chat error: {e}")
         return "Ratchet seems to be thinking too hard right now."
+    finally:
+        if event == "click":
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            print(f"[AI CLICK PERF] ask_ratchet {elapsed_ms:.2f} ms")
 
 
 INTERACTION_NOT_STARTED = object()
 
 
-class InteractionManager:
+class InteractionWorker(QObject):
+    interaction_completed = pyqtSignal(str, bool, object)
+
+    @pyqtSlot(str, object)
+    def run_interaction(self, kind, args):
+        try:
+            if kind == "ai_click":
+                result = ask_ratchet()
+            else:
+                raise ValueError(f"Unsupported interaction kind: {kind}")
+        except Exception as e:
+            print(f"Interaction worker error: {e}")
+            self.interaction_completed.emit(kind, False, str(e))
+            return
+
+        self.interaction_completed.emit(kind, True, result)
+
+
+class InteractionManager(QObject):
+    interaction_requested = pyqtSignal(str, object)
+
     def __init__(self):
+        super().__init__()
         self.active_interaction = None
+        self.active_completion_callback = None
+        self.active_interaction_perf_start = None
+        self.worker_thread = None
+        self.worker = None
 
     @property
     def current_interaction(self):
@@ -494,12 +524,71 @@ class InteractionManager:
 
     def execute_interaction(self, kind, handler, *args, **metadata):
         if not self.begin_interaction(kind, **metadata):
+            if kind == "ai_click":
+                print(f"[AI CLICK PERF] interaction_manager not_started kind={kind}")
             return INTERACTION_NOT_STARTED
 
+        start_time = time.perf_counter()
         try:
             return handler(*args)
         finally:
+            if kind == "ai_click":
+                elapsed_ms = (time.perf_counter() - start_time) * 1000
+                print(
+                    f"[AI CLICK PERF] interaction_manager.execute_interaction "
+                    f"{elapsed_ms:.2f} ms kind={kind}"
+                )
             self.end_interaction()
+
+    def execute_interaction_async(self, kind, on_complete, *args, **metadata):
+        if not self.begin_interaction(kind, **metadata):
+            if kind == "ai_click":
+                print(f"[AI CLICK PERF] interaction_manager not_started kind={kind}")
+            return INTERACTION_NOT_STARTED
+
+        self._ensure_worker_started()
+        self.active_completion_callback = on_complete
+        self.active_interaction_perf_start = time.perf_counter()
+        self.interaction_requested.emit(kind, args)
+        return None
+
+    def _ensure_worker_started(self):
+        if self.worker_thread is not None and self.worker_thread.isRunning():
+            return
+
+        self.worker_thread = QThread()
+        self.worker = InteractionWorker()
+        self.worker.moveToThread(self.worker_thread)
+        self.interaction_requested.connect(self.worker.run_interaction)
+        self.worker.interaction_completed.connect(self._handle_worker_completion)
+        self.worker_thread.finished.connect(self.worker.deleteLater)
+        self.worker_thread.start()
+
+    def _handle_worker_completion(self, kind, success, result):
+        callback = self.active_completion_callback
+
+        try:
+            if callback is not None:
+                callback(kind, success, result)
+        finally:
+            if kind == "ai_click" and self.active_interaction_perf_start is not None:
+                elapsed_ms = (
+                    time.perf_counter() - self.active_interaction_perf_start
+                ) * 1000
+                print(
+                    f"[AI CLICK PERF] interaction_manager.execute_interaction "
+                    f"{elapsed_ms:.2f} ms kind={kind}"
+                )
+
+            self.active_completion_callback = None
+            self.active_interaction_perf_start = None
+            self.end_interaction()
+
+    def shutdown(self):
+        if self.worker_thread is not None and self.worker_thread.isRunning():
+            self.worker_thread.quit()
+            if not self.worker_thread.wait(3000):
+                print("Interaction worker thread did not stop before timeout.")
 
 
 interaction_manager = InteractionManager()
@@ -563,6 +652,8 @@ def clean_exit():
 
     notification_label.hide()
     label.hide()
+
+    interaction_manager.shutdown()
 
     terminate_managed_speech_server(timeout_seconds=5)
 
@@ -1272,14 +1363,20 @@ class Companion(QLabel):
 
         self.last_click = time.time()
 
-        phrase = interaction_manager.execute_interaction("ai_click", ask_ratchet)
+        def complete_ai_click(kind, success, result):
+            _ = kind
+            phrase = result if success else "Ratchet seems to be thinking too hard right now."
 
-        if phrase is INTERACTION_NOT_STARTED:
+            print(phrase)
+            notify(phrase)
+
+        started = interaction_manager.execute_interaction_async(
+            "ai_click",
+            complete_ai_click,
+        )
+
+        if started is INTERACTION_NOT_STARTED:
             return
-
-        print(phrase)
-
-        notify(phrase)
 
     def wheelEvent(self, event):
         buttons = event.buttons()

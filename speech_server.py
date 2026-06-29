@@ -6,6 +6,8 @@ import tempfile
 import random
 import json
 import threading
+import time
+import traceback
 from pathlib import Path
 from datetime import datetime
 from config import (
@@ -388,192 +390,223 @@ def audio_segment_to_array(audio):
 
 @app.route("/chat", methods=["POST"])
 def chat():
+    route_start_time = time.perf_counter()
+    chat_stage = "route_start"
+    event = None
 
-    memory = load_memory()
+    try:
+        chat_stage = "load_memory"
+        memory = load_memory()
 
-    data = request.json or {}
+        chat_stage = "parse_request"
+        data = request.json or {}
 
-    event = data.get("event", "click")
-    sender = data.get("sender")
-    if isinstance(sender, str):
-        sender = sender.strip()
-    else:
-        sender = ""
+        event = data.get("event", "click")
+        sender = data.get("sender")
+        if isinstance(sender, str):
+            sender = sender.strip()
+        else:
+            sender = ""
 
-    summary = data.get("summary")
-    if isinstance(summary, str):
-        summary = summary.strip()
-    else:
-        summary = ""
+        summary = data.get("summary")
+        if isinstance(summary, str):
+            summary = summary.strip()
+        else:
+            summary = ""
 
-    user_prompt = data.get("prompt")
-    if isinstance(user_prompt, str):
-        user_prompt = user_prompt.strip()
-    else:
-        user_prompt = ""
+        user_prompt = data.get("prompt")
+        if isinstance(user_prompt, str):
+            user_prompt = user_prompt.strip()
+        else:
+            user_prompt = ""
 
-    latest_note_text_cache = None
+        latest_note_text_cache = None
 
-    def get_latest_note_text_for_context():
-        nonlocal latest_note_text_cache
+        def get_latest_note_text_for_context():
+            nonlocal latest_note_text_cache, chat_stage
 
-        if latest_note_text_cache is not None:
+            if latest_note_text_cache is not None:
+                return latest_note_text_cache
+
+            chat_stage = "click_latest_note"
+            latest_note_entry = get_latest_note()
+
+            if latest_note_entry is None:
+                latest_note_text_cache = ""
+            else:
+                latest_note_text_cache = extract_note_text(latest_note_entry).strip()
+
             return latest_note_text_cache
 
-        latest_note_entry = get_latest_note()
+        def build_llm_context(latest_note_text=None):
+            nonlocal chat_stage
+            resolved_latest_note = latest_note_text
 
-        if latest_note_entry is None:
-            latest_note_text_cache = ""
-        else:
-            latest_note_text_cache = extract_note_text(latest_note_entry).strip()
+            if resolved_latest_note is None:
+                resolved_latest_note = get_latest_note_text_for_context()
 
-        return latest_note_text_cache
+            chat_stage = "click_llm_context"
+            return llm_service.build_context(
+                personality=PERSONALITY,
+                latest_note=resolved_latest_note,
+                click_count=memory.get("click_count", 0),
+                notification={
+                    "source": event,
+                    "sender": sender,
+                    "summary": summary,
+                },
+            )
 
-    def build_llm_context(latest_note_text=None):
-        resolved_latest_note = latest_note_text
+        def has_llm_text(candidate):
+            return isinstance(candidate, str) and bool(candidate.strip())
 
-        if resolved_latest_note is None:
-            resolved_latest_note = get_latest_note_text_for_context()
+        chat_stage = "update_memory_counts"
+        # Track usage
+        if event == "click":
+            memory["click_count"] += 1
 
-        return llm_service.build_context(
-            personality=PERSONALITY,
-            latest_note=resolved_latest_note,
-            click_count=memory.get("click_count", 0),
-            notification={
-                "source": event,
-                "sender": sender,
-                "summary": summary,
-            },
-        )
+        elif event == "startup":
+            memory["startup_count"] += 1
 
-    def has_llm_text(candidate):
-        return isinstance(candidate, str) and bool(candidate.strip())
+        save_memory(memory)
 
-    # Track usage
-    if event == "click":
-        memory["click_count"] += 1
+        click_responses = CLICK_RESPONSES
+        startup_responses = STARTUP_RESPONSES
 
-    elif event == "startup":
-        memory["startup_count"] += 1
+        discord_responses = [
+            message.format(sender=sender)
+            for message in DISCORD_RESPONSES
+        ]
 
-    save_memory(memory)
+        discord_sender_responses = [
+            message.format(sender=sender)
+            for message in DISCORD_SENDER_RESPONSES
+        ]
 
-    click_responses = CLICK_RESPONSES
-    startup_responses = STARTUP_RESPONSES
+        if event == "prompt":
+            chat_stage = "prompt_branch"
 
-    discord_responses = [
-        message.format(sender=sender)
-        for message in DISCORD_RESPONSES
-    ]
+            prompt_context = build_llm_context()
+            tool_response = tool_manager.handle(user_prompt, prompt_context)
 
-    discord_sender_responses = [
-        message.format(sender=sender)
-        for message in DISCORD_SENDER_RESPONSES
-    ]
-
-    if event == "prompt":
-
-        prompt_context = build_llm_context()
-        tool_response = tool_manager.handle(user_prompt, prompt_context)
-
-        if has_llm_text(tool_response):
-            response = tool_response.strip()
-        else:
-            routed_profile = intent_router.route(user_prompt, prompt_context)
-
-            with use_profile(routed_profile):
-                llm_prompt_response = llm_service.generate_prompt_response(
-                    user_prompt,
-                    prompt_context
-                )
-
-            if has_llm_text(llm_prompt_response):
-                response = llm_prompt_response.strip()
+            if has_llm_text(tool_response):
+                response = tool_response.strip()
             else:
-                response = "Ratchet seems to be thinking too hard right now."
+                routed_profile = intent_router.route(user_prompt, prompt_context)
 
-    elif event == "startup":
+                with use_profile(routed_profile):
+                    llm_prompt_response = llm_service.generate_prompt_response(
+                        user_prompt,
+                        prompt_context
+                    )
 
-        response = random.choice(startup_responses)
+                if has_llm_text(llm_prompt_response):
+                    response = llm_prompt_response.strip()
+                else:
+                    response = "Ratchet seems to be thinking too hard right now."
 
-    elif event == "discord":
+        elif event == "startup":
+            chat_stage = "startup_branch"
 
-        notification_context = build_llm_context()
-        llm_notification_response = llm_service.generate_notification_response(
-            notification_context
-        )
+            response = random.choice(startup_responses)
 
-        if has_llm_text(llm_notification_response):
-            response = llm_notification_response.strip()
-        elif sender:
-            response = random.choice(discord_sender_responses)
+        elif event == "discord":
+            chat_stage = "discord_branch"
+
+            notification_context = build_llm_context()
+            llm_notification_response = llm_service.generate_notification_response(
+                notification_context
+            )
+
+            if has_llm_text(llm_notification_response):
+                response = llm_notification_response.strip()
+            elif sender:
+                response = random.choice(discord_sender_responses)
+            else:
+                response = random.choice(discord_responses)
+
         else:
-            response = random.choice(discord_responses)
+            milestone_response = None
 
-    else:
-        milestone_response = None
+            if event == "click":
+                milestone_response = CLICK_MILESTONES.get(memory["click_count"])
+
+            if milestone_response is not None:
+                response = milestone_response
+
+            else:
+                chat_stage = "click_latest_note"
+                latest_note = get_latest_note() if event == "click" else None
+                latest_note_text = extract_note_text(latest_note).strip() if latest_note else ""
+                latest_note_text_cache = latest_note_text
+
+                if (
+                    event == "click"
+                    and latest_note_text
+                    and random.random() < 0.2
+                ):
+                    chat_stage = "click_memory_response"
+                    memory_context = build_llm_context(latest_note_text=latest_note_text)
+                    llm_memory_response = llm_service.generate_memory_response(
+                        memory_context
+                    )
+
+                    if has_llm_text(llm_memory_response):
+                        response = llm_memory_response.strip()
+                    else:
+                        template = random.choice(CLICK_MEMORY_RESPONSES)
+                        response = template.format(note=latest_note_text)
+                else:
+
+                    llm_click_response = None
+
+                    if event == "click" and random.random() < 0.75:
+                        click_context = build_llm_context(
+                            latest_note_text=latest_note_text or None
+                        )
+                        print("AI CLICK TRIGGERED")
+                        chat_stage = "click_llm_generate"
+                        llm_click_response = llm_service.generate_click_response(
+                            click_context
+                        )
+
+                        print("LLM CLICK RESPONSE:", repr(llm_click_response))
+
+                    if has_llm_text(llm_click_response):
+                        response = llm_click_response.strip()
+                    else:
+                        chat_stage = "click_fallback_response"
+
+                        available_responses = [
+                            r for r in click_responses
+                            if r != memory["last_response"]
+                        ]
+
+                        if available_responses:
+                            response = random.choice(available_responses)
+                        else:
+                            response = random.choice(click_responses)
+
+        chat_stage = "save_last_response"
+        memory["last_response"] = response
+        save_memory(memory)
 
         if event == "click":
-            milestone_response = CLICK_MILESTONES.get(memory["click_count"])
+            elapsed_ms = (time.perf_counter() - route_start_time) * 1000
+            print(f"[AI CLICK PERF] speech_server.chat_route {elapsed_ms:.2f} ms")
 
-        if milestone_response is not None:
-            response = milestone_response
-
-        else:
-            latest_note = get_latest_note() if event == "click" else None
-            latest_note_text = extract_note_text(latest_note).strip() if latest_note else ""
-            latest_note_text_cache = latest_note_text
-
-            if (
-                event == "click"
-                and latest_note_text
-                and random.random() < 0.2
-            ):
-                memory_context = build_llm_context(latest_note_text=latest_note_text)
-                llm_memory_response = llm_service.generate_memory_response(
-                    memory_context
-                )
-
-                if has_llm_text(llm_memory_response):
-                    response = llm_memory_response.strip()
-                else:
-                    template = random.choice(CLICK_MEMORY_RESPONSES)
-                    response = template.format(note=latest_note_text)
-            else:
-
-                llm_click_response = None
-
-                if event == "click" and random.random() < 0.75:
-                    click_context = build_llm_context(
-                        latest_note_text=latest_note_text or None
-                    )
-                    print("AI CLICK TRIGGERED")
-                    llm_click_response = llm_service.generate_click_response(
-                        click_context
-                    )
-
-                    print("LLM CLICK RESPONSE:", repr(llm_click_response))
-
-                if has_llm_text(llm_click_response):
-                    response = llm_click_response.strip()
-                else:
-
-                    available_responses = [
-                        r for r in click_responses
-                        if r != memory["last_response"]
-                    ]
-
-                    if available_responses:
-                        response = random.choice(available_responses)
-                    else:
-                        response = random.choice(click_responses)
-
-    memory["last_response"] = response
-    save_memory(memory)
-
-    return jsonify({
-        "response": response
-    })
+        chat_stage = "return_response"
+        return jsonify({
+            "response": response
+        })
+    except Exception as e:
+        print("[CHAT SERVER TRACE] Uncaught /chat exception")
+        print("[CHAT SERVER TRACE] event:", repr(event))
+        print("[CHAT SERVER TRACE] chat_stage:", chat_stage)
+        print("[CHAT SERVER TRACE] exception_type:", type(e).__name__)
+        print("[CHAT SERVER TRACE] exception_message:", str(e))
+        traceback.print_exc()
+        raise
 
 @app.route("/note", methods=["POST"])
 def note():

@@ -1,3 +1,5 @@
+import time
+
 import requests
 
 from config import (
@@ -11,6 +13,18 @@ from config import (
 )
 
 
+def _print_chat_response_diagnostics(url, payload, response):
+    raw_content = response.content or b""
+    preview = raw_content[:1000].decode("utf-8", errors="replace")
+
+    print("[CHAT JSON TRACE] Request URL:", url)
+    print("[CHAT JSON TRACE] Request payload:", payload)
+    print("[CHAT JSON TRACE] Status code:", response.status_code)
+    print("[CHAT JSON TRACE] Content-Type:", response.headers.get("Content-Type"))
+    print("[CHAT JSON TRACE] Raw response length:", len(raw_content))
+    print("[CHAT JSON TRACE] Raw response preview:", repr(preview))
+
+
 def chat(event, sender=None, interaction_data=None):
     payload = {
         "event": event
@@ -22,12 +36,27 @@ def chat(event, sender=None, interaction_data=None):
     if interaction_data:
         payload.update(interaction_data)
 
-    response = requests.post(
-        f"{BASE_URL}/chat",
-        json=payload,
-        timeout=API_TIMEOUT_CHAT_SEC
-    )
-    return response.json()
+    url = f"{BASE_URL}/chat"
+    should_log_perf = event == "click"
+    start_time = time.perf_counter()
+    try:
+        response = requests.post(
+            url,
+            json=payload,
+            timeout=API_TIMEOUT_CHAT_SEC
+        )
+    finally:
+        if should_log_perf:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            print(f"[AI CLICK PERF] api_client.chat {elapsed_ms:.2f} ms")
+
+    _print_chat_response_diagnostics(url, payload, response)
+
+    try:
+        return response.json()
+    except Exception:
+        print("[CHAT JSON TRACE] JSON parsing failed.")
+        raise
 
 
 def speak(text):

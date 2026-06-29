@@ -7,6 +7,7 @@ the active provider selected by the provider factory.
 from __future__ import annotations
 
 import re
+import time
 from typing import Any
 
 from speech_data.provider_factory import get_active_provider
@@ -85,46 +86,51 @@ class LLMService:
 
     def generate_click_response(self, context: dict[str, Any]) -> str | None:
         """Generate a click response via the active provider."""
+        start_time = time.perf_counter()
         try:
-            personality = str(context.get("personality", "") or "").strip()
-            click_count = int(context.get("click_count", 0) or 0)
-            latest_note = str(context.get("latest_note", "") or "").strip()
-        except (AttributeError, TypeError, ValueError):
-            return None
+            try:
+                personality = str(context.get("personality", "") or "").strip()
+                click_count = int(context.get("click_count", 0) or 0)
+                latest_note = str(context.get("latest_note", "") or "").strip()
+            except (AttributeError, TypeError, ValueError):
+                return None
 
-        if latest_note:
-            latest_note_line = f"Latest note: {latest_note}"
-        else:
-            latest_note_line = "Latest note: none"
+            if latest_note:
+                latest_note_line = f"Latest note: {latest_note}"
+            else:
+                latest_note_line = "Latest note: none"
 
-        prompt = (
-            "You are Rivet, a friendly and playful AI companion.\n"
-            "Use the personality profile below to stay in character.\n\n"
-            "Personality profile:\n"
-            f"{personality or 'No personality profile provided.'}\n\n"
-            "Current click context:\n"
-            f"Click count: {click_count}\n"
-            f"{latest_note_line}\n\n"
-            "Memory guidance:\n"
-            "- Memories are background context.\n"
-            "- Do not assume the user is currently thinking about a memory.\n"
-            "- Mention memories only when naturally relevant.\n"
-            "- Most responses should not mention memories.\n\n"
-            "Response rules:\n"
-            "- Return exactly one sentence.\n"
-            "- Keep it concise.\n"
-            "- Stay in-character as Rivet.\n"
-            "- Keep tone friendly and playful.\n"
-            "- Plain conversational dialogue only.\n"
-            "- Do not write code, examples, function definitions, labels, explanations, Markdown, or code fences.\n"
-            "- Do not wrap the response in quotes.\n"
-            "Return only one short spoken line from Rivet."
-        )
+            prompt = (
+                "You are Rivet, a friendly and playful AI companion.\n"
+                "Use the personality profile below to stay in character.\n\n"
+                "Personality profile:\n"
+                f"{personality or 'No personality profile provided.'}\n\n"
+                "Current click context:\n"
+                f"Click count: {click_count}\n"
+                f"{latest_note_line}\n\n"
+                "Memory guidance:\n"
+                "- Memories are background context.\n"
+                "- Do not assume the user is currently thinking about a memory.\n"
+                "- Mention memories only when naturally relevant.\n"
+                "- Most responses should not mention memories.\n\n"
+                "Response rules:\n"
+                "- Return exactly one sentence.\n"
+                "- Keep it concise.\n"
+                "- Stay in-character as Rivet.\n"
+                "- Keep tone friendly and playful.\n"
+                "- Plain conversational dialogue only.\n"
+                "- Do not write code, examples, function definitions, labels, explanations, Markdown, or code fences.\n"
+                "- Do not wrap the response in quotes.\n"
+                "Return only one short spoken line from Rivet."
+            )
 
-        response = self.generate_provider_response(prompt)
-        if not self.is_plain_click_response(response):
-            return None
-        return response.strip()
+            response = self.generate_provider_response(prompt)
+            if not self.is_plain_click_response(response):
+                return None
+            return response.strip()
+        finally:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            print(f"[AI CLICK PERF] llm_service.generate_click_response {elapsed_ms:.2f} ms")
 
     def generate_prompt_response(
         self,

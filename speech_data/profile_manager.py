@@ -15,6 +15,7 @@ from config_store import get_config_value, set_config_value
 PROFILES_DIR = SPEECH_DATA_DIR / "profiles"
 DEFAULT_ACTIVE_PROFILE = "fast-chat"
 REQUIRED_PROFILE_FIELDS = ("name", "category", "provider", "model")
+OPTIONAL_PROFILE_FIELDS = ("mmproj",)
 
 
 class ProfileManager:
@@ -47,6 +48,13 @@ class ProfileManager:
 
         settings = profile_data.get("settings", {})
         normalized["settings"] = deepcopy(settings) if isinstance(settings, dict) else {}
+
+        for field in OPTIONAL_PROFILE_FIELDS:
+            value = profile_data.get(field)
+
+            if isinstance(value, str) and value.strip():
+                normalized[field] = value.strip()
+
         normalized["display_name"] = normalized["name"]
         return normalized
 
@@ -180,6 +188,23 @@ class ProfileManager:
 
         return model_path
 
+    def resolve_optional_profile_path(
+        self,
+        profile: dict[str, Any],
+        field: str,
+    ) -> Path | None:
+        value = profile.get(field)
+
+        if not isinstance(value, str) or not value.strip():
+            return None
+
+        profile_path = Path(value.strip())
+
+        if not profile_path.is_absolute():
+            profile_path = BASE_DIR / profile_path
+
+        return profile_path
+
 
 profile_manager = ProfileManager()
 
@@ -206,3 +231,7 @@ def use_profile(profile_key: str | None) -> Iterator[None]:
 
 def resolve_model_path(profile: dict[str, Any]) -> Path:
     return profile_manager.resolve_model_path(profile)
+
+
+def resolve_optional_profile_path(profile: dict[str, Any], field: str) -> Path | None:
+    return profile_manager.resolve_optional_profile_path(profile, field)

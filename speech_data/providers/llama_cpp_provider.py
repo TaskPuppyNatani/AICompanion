@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -14,7 +15,11 @@ from config import (
     LLAMA_CPP_REQUEST_TIMEOUT_SEC,
     LLAMA_CPP_SERVER_EXE_PATH,
 )
-from speech_data.profile_manager import get_active_profile, resolve_model_path
+from speech_data.profile_manager import (
+    get_active_profile,
+    resolve_model_path,
+    resolve_optional_profile_path,
+)
 from speech_data.providers.base import LLMProvider
 
 
@@ -35,6 +40,7 @@ class LlamaCppProvider(LLMProvider):
 
     def start(self) -> None:
         model_path = resolve_model_path(self.profile)
+        mmproj_path = resolve_optional_profile_path(self.profile, "mmproj")
 
         if not LLAMA_CPP_SERVER_EXE_PATH.is_file():
             raise RuntimeError(
@@ -46,6 +52,11 @@ class LlamaCppProvider(LLMProvider):
                 f"llama.cpp model not found: {model_path}"
             )
 
+        if mmproj_path is not None and not mmproj_path.is_file():
+            raise RuntimeError(
+                f"llama.cpp multimodal projector not found: {mmproj_path}"
+            )
+
         command = [
             str(LLAMA_CPP_SERVER_EXE_PATH),
             "-m",
@@ -55,6 +66,9 @@ class LlamaCppProvider(LLMProvider):
             "--port",
             str(LLAMA_CPP_PORT),
         ]
+
+        if mmproj_path is not None:
+            command.extend(["--mmproj", str(mmproj_path)])
 
         try:
             self.process = subprocess.Popen(
@@ -85,38 +99,43 @@ class LlamaCppProvider(LLMProvider):
             self.started_by_companion = False
 
     def generate_text(self, prompt: str) -> str | None:
-        if not isinstance(prompt, str) or not prompt.strip():
-            return None
-
-        payload = {
-            "prompt": prompt,
-            "stream": False,
-        }
-
-        request = Request(
-            LLAMA_CPP_COMPLETION_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
+        start_time = time.perf_counter()
         try:
-            with urlopen(request, timeout=LLAMA_CPP_REQUEST_TIMEOUT_SEC) as response:
-                if getattr(response, "status", 200) >= 400:
-                    return None
+            if not isinstance(prompt, str) or not prompt.strip():
+                return None
 
-                response_data = response.read().decode("utf-8")
+            payload = {
+                "prompt": prompt,
+                "stream": False,
+            }
 
-            parsed = json.loads(response_data)
+            request = Request(
+                LLAMA_CPP_COMPLETION_URL,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
 
-        except (OSError, URLError, ValueError, TypeError) as e:
-            print("LLAMA.CPP FAILED:", repr(e))
-            return None
+            try:
+                with urlopen(request, timeout=LLAMA_CPP_REQUEST_TIMEOUT_SEC) as response:
+                    if getattr(response, "status", 200) >= 400:
+                        return None
 
-        generated_text = parsed.get("content")
+                    response_data = response.read().decode("utf-8")
 
-        if not isinstance(generated_text, str):
-            return None
+                parsed = json.loads(response_data)
 
-        generated_text = generated_text.strip()
-        return generated_text or None
+            except (OSError, URLError, ValueError, TypeError) as e:
+                print("LLAMA.CPP FAILED:", repr(e))
+                return None
+
+            generated_text = parsed.get("content")
+
+            if not isinstance(generated_text, str):
+                return None
+
+            generated_text = generated_text.strip()
+            return generated_text or None
+        finally:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            print(f"[AI CLICK PERF] llama_cpp.generate_text {elapsed_ms:.2f} ms")

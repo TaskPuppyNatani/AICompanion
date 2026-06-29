@@ -4,6 +4,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
@@ -83,44 +84,49 @@ class OllamaProvider(LLMProvider):
             self.started_by_companion = False
 
     def generate_text(self, prompt: str) -> str | None:
-        if not isinstance(prompt, str) or not prompt.strip():
-            return None
-
-        model_name = self.profile.get("model", "")
-
-        if not isinstance(model_name, str) or not model_name.strip():
-            model_name = OLLAMA_MODEL_NAME
-
-        payload = {
-            "model": model_name.strip(),
-            "prompt": prompt,
-            "stream": False,
-        }
-
-        request = Request(
-            OLLAMA_GENERATE_URL,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-
+        start_time = time.perf_counter()
         try:
-            with urlopen(request, timeout=OLLAMA_REQUEST_TIMEOUT_SEC) as response:
-                if getattr(response, "status", 200) >= 400:
-                    return None
+            if not isinstance(prompt, str) or not prompt.strip():
+                return None
 
-                response_data = response.read().decode("utf-8")
+            model_name = self.profile.get("model", "")
 
-            parsed = json.loads(response_data)
+            if not isinstance(model_name, str) or not model_name.strip():
+                model_name = OLLAMA_MODEL_NAME
 
-        except (OSError, URLError, ValueError, TypeError) as e:
-            print("OLLAMA FAILED:", repr(e))
-            return None
+            payload = {
+                "model": model_name.strip(),
+                "prompt": prompt,
+                "stream": False,
+            }
 
-        generated_text = parsed.get("response")
+            request = Request(
+                OLLAMA_GENERATE_URL,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
 
-        if not isinstance(generated_text, str):
-            return None
+            try:
+                with urlopen(request, timeout=OLLAMA_REQUEST_TIMEOUT_SEC) as response:
+                    if getattr(response, "status", 200) >= 400:
+                        return None
 
-        generated_text = generated_text.strip()
-        return generated_text or None
+                    response_data = response.read().decode("utf-8")
+
+                parsed = json.loads(response_data)
+
+            except (OSError, URLError, ValueError, TypeError) as e:
+                print("OLLAMA FAILED:", repr(e))
+                return None
+
+            generated_text = parsed.get("response")
+
+            if not isinstance(generated_text, str):
+                return None
+
+            generated_text = generated_text.strip()
+            return generated_text or None
+        finally:
+            elapsed_ms = (time.perf_counter() - start_time) * 1000
+            print(f"[AI CLICK PERF] ollama.generate_text {elapsed_ms:.2f} ms")
