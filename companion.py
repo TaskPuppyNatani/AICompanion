@@ -19,6 +19,8 @@ from config import (
 
 from PyQt6.QtGui import (
     QPixmap,
+    QKeySequence,
+    QShortcut,
     QGuiApplication,
     QPainter,
     QPainterPath,
@@ -191,6 +193,47 @@ class ThoughtBubbleWidget(QWidget):
 
         painter.setPen(QColor("black"))
         painter.drawText(text_rect, self._text, text_option)
+
+
+class PromptWindow(QWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Rivet Prompt")
+        self.resize(720, 520)
+
+        layout = QVBoxLayout(self)
+
+        self.prompt_label = QLabel(self)
+        self.prompt_label.setWordWrap(True)
+        self.prompt_label.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.prompt_label)
+
+        self.response_text = QTextEdit(self)
+        self.response_text.setReadOnly(True)
+        self.response_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        layout.addWidget(self.response_text)
+
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        close_button = QPushButton("Close", self)
+        close_button.clicked.connect(self.hide)
+        button_layout.addWidget(close_button)
+
+        layout.addLayout(button_layout)
+
+        self.escape_shortcut = QShortcut(QKeySequence("Escape"), self)
+        self.escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.escape_shortcut.activated.connect(self.hide)
+
+    def show_response(self, prompt, response, profile_name=None):
+        _ = profile_name
+        self.prompt_label.setText(f"Prompt: {prompt}")
+        self.response_text.setPlainText("" if response is None else str(response))
+        self.show()
+        self.raise_()
+        self.activateWindow()
 
 notifications = [
     "New email received.",
@@ -403,9 +446,9 @@ def speak(message):
     finally:
         speaking = False
 
-def ask_ratchet(event="click", sender=None):
+def ask_ratchet(event="click", sender=None, interaction_data=None):
     try:
-        response = api_client.chat(event, sender)
+        response = api_client.chat(event, sender, interaction_data=interaction_data)
 
         return response["response"]
 
@@ -462,6 +505,14 @@ class InteractionManager:
 interaction_manager = InteractionManager()
 
 
+def dispatch_speech(message):
+    threading.Thread(
+        target=speak,
+        args=(message,),
+        daemon=True
+    ).start()
+
+
 def notify(message):
     print(f"NOTIFICATION: {message}")
 
@@ -483,11 +534,7 @@ def notify(message):
 
     notification_label.show()
 
-    threading.Thread(
-        target=speak,
-        args=(message,),
-        daemon=True
-    ).start()
+    dispatch_speech(message)
 
     duration_ms = min(
         20000,
@@ -540,6 +587,10 @@ class Companion(QLabel):
         self.avatar_source_pixmap = None
         self.avatar_size = None
         self.avatar_resized = False
+        self.prompt_window = PromptWindow()
+        self.prompt_shortcut = QShortcut(QKeySequence("Ctrl+Space"), self)
+        self.prompt_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
+        self.prompt_shortcut.activated.connect(self.open_prompt_dialog)
         self.context_menu = QMenu(self)
         self.model_profiles_menu = self.context_menu.addMenu("Model Profiles")
         self.model_profiles_menu.aboutToShow.connect(
@@ -1157,6 +1208,45 @@ class Companion(QLabel):
 
     def show_context_menu(self, event):
         self.context_menu.exec(event.globalPosition().toPoint())
+
+    def open_prompt_dialog(self):
+        prompt_dialog = QDialog(self)
+        prompt_dialog.setWindowTitle("Prompt Rivet")
+        prompt_dialog.setModal(True)
+
+        layout = QVBoxLayout(prompt_dialog)
+        prompt_input = QLineEdit(prompt_dialog)
+        prompt_input.setPlaceholderText("Ask Rivet...")
+        layout.addWidget(prompt_input)
+
+        prompt_input.returnPressed.connect(prompt_dialog.accept)
+
+        QTimer.singleShot(0, prompt_input.setFocus)
+
+        if prompt_dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        user_prompt = prompt_input.text().strip()
+
+        if not user_prompt:
+            return
+
+        phrase = interaction_manager.execute_interaction(
+            "prompt",
+            lambda: ask_ratchet(
+                "prompt",
+                interaction_data={"prompt": user_prompt}
+            ),
+            prompt=user_prompt
+        )
+
+        if phrase is INTERACTION_NOT_STARTED:
+            return
+
+        print(phrase)
+
+        self.prompt_window.show_response(user_prompt, phrase)
+        dispatch_speech(phrase)
 
     def mousePressEvent(self, event):
 
