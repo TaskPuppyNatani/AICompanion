@@ -13,12 +13,117 @@ from config import (
 )
 
 
+BASE64_PREVIEW_MIN_LENGTH = 512
+BINARY_FIELD_NAMES = {
+    "blob",
+    "binary",
+    "bytes",
+    "data_base64",
+    "file_base64",
+    "image_base64",
+    "audio_base64",
+    "content_base64",
+    "payload_base64",
+}
+BINARY_FIELD_SUFFIXES = ("_base64",)
+BASE64_CHARS = frozenset(
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789"
+    "+/=\r\n"
+)
+
+
+def _estimated_base64_size(value):
+    if not isinstance(value, str):
+        return None
+
+    compact_value = "".join(value.split())
+
+    if not compact_value:
+        return 0
+
+    padding = len(compact_value) - len(compact_value.rstrip("="))
+    return max(0, (len(compact_value) * 3 // 4) - padding)
+
+
+def _format_omitted_payload(label, size_bytes=None):
+    if not isinstance(size_bytes, int) or size_bytes <= 0:
+        return f"<{label} omitted>"
+
+    if size_bytes >= 1024 * 1024:
+        size_label = f"{size_bytes / (1024 * 1024):.1f} MB"
+    elif size_bytes >= 1024:
+        size_label = f"{size_bytes / 1024:.1f} KB"
+    else:
+        size_label = f"{size_bytes} B"
+
+    return f"<{label} omitted (~{size_label})>"
+
+
+def _is_binary_field_name(key):
+    if not isinstance(key, str):
+        return False
+
+    normalized_key = key.strip().lower()
+
+    if normalized_key in BINARY_FIELD_NAMES:
+        return True
+
+    return any(
+        normalized_key.endswith(suffix)
+        for suffix in BINARY_FIELD_SUFFIXES
+    )
+
+
+def _looks_like_large_base64(value):
+    if not isinstance(value, str):
+        return False
+
+    if len(value) < BASE64_PREVIEW_MIN_LENGTH:
+        return False
+
+    compact_value = "".join(value.split())
+
+    if len(compact_value) < BASE64_PREVIEW_MIN_LENGTH:
+        return False
+
+    return all(char in BASE64_CHARS for char in compact_value)
+
+
+def sanitize_payload_for_logging(payload, field_name=None):
+    if isinstance(payload, dict):
+        return {
+            key: sanitize_payload_for_logging(value, key)
+            for key, value in payload.items()
+        }
+
+    if isinstance(payload, list):
+        return [
+            sanitize_payload_for_logging(value, field_name)
+            for value in payload
+        ]
+
+    if isinstance(payload, (bytes, bytearray)):
+        return _format_omitted_payload("binary", len(payload))
+
+    if _is_binary_field_name(field_name):
+        size_bytes = _estimated_base64_size(payload)
+        return _format_omitted_payload("base64", size_bytes)
+
+    if _looks_like_large_base64(payload):
+        size_bytes = _estimated_base64_size(payload)
+        return _format_omitted_payload("base64", size_bytes)
+
+    return payload
+
+
 def _print_chat_response_diagnostics(url, payload, response):
     raw_content = response.content or b""
     preview = raw_content[:1000].decode("utf-8", errors="replace")
 
     print("[CHAT JSON TRACE] Request URL:", url)
-    print("[CHAT JSON TRACE] Request payload:", payload)
+    print("[CHAT JSON TRACE] Request payload:", sanitize_payload_for_logging(payload))
     print("[CHAT JSON TRACE] Status code:", response.status_code)
     print("[CHAT JSON TRACE] Content-Type:", response.headers.get("Content-Type"))
     print("[CHAT JSON TRACE] Raw response length:", len(raw_content))
