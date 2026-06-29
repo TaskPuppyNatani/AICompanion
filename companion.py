@@ -59,6 +59,7 @@ from PyQt6.QtCore import (
     QByteArray,
     QBuffer,
     QIODevice,
+    QEvent,
 )
 from companion_app.local_notify_server import (
     register_notify_callback,
@@ -254,163 +255,206 @@ class ThoughtBubbleWidget(QWidget):
 
 
 class PromptWindow(QWidget):
-    imageDropped = pyqtSignal(str)
+    submitRequested = pyqtSignal(str, object, object)
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Rivet Prompt")
-        self.resize(720, 520)
         self.setAcceptDrops(True)
+        self.attachment = None
+        self._base_style = self.styleSheet()
+        self._geometry_ready = False
 
         layout = QVBoxLayout(self)
+        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
 
-        self.prompt_label = QLabel(self)
-        self.prompt_label.setWordWrap(True)
-        self.prompt_label.setTextFormat(Qt.TextFormat.PlainText)
-        layout.addWidget(self.prompt_label)
+        self.prompt_editor = QTextEdit(self)
+        self.prompt_editor.setPlaceholderText("Ask Rivet... Ctrl+Enter to submit")
+        self.prompt_editor.setToolTip("Enter adds a new line. Ctrl+Enter submits.")
+        self.prompt_editor.setAcceptRichText(False)
+        self.prompt_editor.setMinimumHeight(120)
+        self.prompt_editor.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self.prompt_editor.installEventFilter(self)
+        layout.addWidget(self.prompt_editor)
 
-        self.attachment_label = QLabel(self)
-        self.attachment_label.setFixedSize(112, 112)
-        self.attachment_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.attachment_label.hide()
-        layout.addWidget(self.attachment_label)
+        attachment_layout = QHBoxLayout()
+        attachment_layout.setSpacing(12)
+
+        thumbnail_layout = QVBoxLayout()
+        self.thumbnail_label = QLabel(self)
+        self.thumbnail_label.setFixedSize(128, 128)
+        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail_label.setText("Drop image")
+        thumbnail_layout.addWidget(self.thumbnail_label)
+
+        self.filename_label = QLabel(self)
+        self.filename_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.filename_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.filename_label.setWordWrap(True)
+        self.filename_label.hide()
+        thumbnail_layout.addWidget(self.filename_label)
+        attachment_layout.addLayout(thumbnail_layout)
+
+        attachment_button_layout = QVBoxLayout()
+
+        browse_button = QPushButton("Attach Image", self)
+        browse_button.clicked.connect(self.browse_image)
+        attachment_button_layout.addWidget(browse_button)
+
+        paste_button = QPushButton("Paste Image", self)
+        paste_button.clicked.connect(self.paste_image)
+        attachment_button_layout.addWidget(paste_button)
+
+        self.remove_button = QPushButton("Remove", self)
+        self.remove_button.clicked.connect(self.remove_image)
+        self.remove_button.setEnabled(False)
+        attachment_button_layout.addWidget(self.remove_button)
+        attachment_button_layout.addStretch()
+
+        attachment_layout.addLayout(attachment_button_layout)
+        attachment_layout.addStretch()
+        layout.addLayout(attachment_layout)
+
+        action_layout = QHBoxLayout()
+
+        self.microphone_button = QPushButton("Mic", self)
+        self.microphone_button.setEnabled(False)
+        self.microphone_button.setToolTip("Reserved for future dictation.")
+        action_layout.addWidget(self.microphone_button)
+
+        action_layout.addStretch()
+
+        submit_button = QPushButton("Submit", self)
+        submit_button.setToolTip("Submit prompt (Ctrl+Enter)")
+        submit_button.clicked.connect(self.submit_prompt)
+        action_layout.addWidget(submit_button)
+
+        close_button = QPushButton("Close", self)
+        close_button.clicked.connect(self.hide)
+        action_layout.addWidget(close_button)
+
+        layout.addLayout(action_layout)
 
         self.response_text = QTextEdit(self)
         self.response_text.setReadOnly(True)
         self.response_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self._response_base_style = self.response_text.styleSheet()
-        layout.addWidget(self.response_text)
-
-        button_layout = QHBoxLayout()
-        button_layout.addStretch()
-
-        close_button = QPushButton("Close", self)
-        close_button.clicked.connect(self.hide)
-        button_layout.addWidget(close_button)
-
-        layout.addLayout(button_layout)
+        self.response_text.setMinimumHeight(260)
+        layout.addWidget(self.response_text, 1)
 
         self.escape_shortcut = QShortcut(QKeySequence("Escape"), self)
         self.escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.escape_shortcut.activated.connect(self.hide)
 
-    def _set_drop_highlight(self, enabled):
-        if enabled:
-            self.response_text.setStyleSheet("QTextEdit { border: 2px dashed #4f9cff; }")
-        else:
-            self.response_text.setStyleSheet(self._response_base_style)
+        self.submit_shortcut_return = QShortcut(
+            QKeySequence("Ctrl+Return"),
+            self,
+        )
+        self.submit_shortcut_return.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.submit_shortcut_return.activated.connect(self.submit_prompt)
 
-    def dragEnterEvent(self, event):
-        image_path = _find_first_image_file_path(event.mimeData())
+        self.submit_shortcut_enter = QShortcut(
+            QKeySequence("Ctrl+Enter"),
+            self,
+        )
+        self.submit_shortcut_enter.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self.submit_shortcut_enter.activated.connect(self.submit_prompt)
 
-        if image_path is None:
-            event.ignore()
+        self._geometry_save_timer = QTimer(self)
+        self._geometry_save_timer.setSingleShot(True)
+        self._geometry_save_timer.timeout.connect(self.save_geometry)
+
+        self.restore_geometry()
+        self._geometry_ready = True
+
+    def restore_geometry(self):
+        geometry = config.get("prompt_window_geometry")
+
+        if isinstance(geometry, dict):
+            try:
+                x = int(geometry["x"])
+                y = int(geometry["y"])
+                width = max(480, int(geometry["width"]))
+                height = max(420, int(geometry["height"]))
+            except (KeyError, TypeError, ValueError):
+                x = y = width = height = None
+
+            if None not in (x, y, width, height):
+                self.setGeometry(x, y, width, height)
+                return
+
+        self.resize(820, 680)
+
+    def schedule_geometry_save(self):
+        if not self._geometry_ready:
             return
 
-        self._set_drop_highlight(True)
-        event.acceptProposedAction()
+        if self.isVisible():
+            self._geometry_save_timer.start(400)
 
-    def dragLeaveEvent(self, event):
-        self._set_drop_highlight(False)
-        event.accept()
+    def save_geometry(self):
+        geometry = self.geometry()
+        set_config_value(
+            "prompt_window_geometry",
+            {
+                "x": geometry.x(),
+                "y": geometry.y(),
+                "width": geometry.width(),
+                "height": geometry.height(),
+            },
+        )
 
-    def dropEvent(self, event):
-        self._set_drop_highlight(False)
-        image_path = _find_first_image_file_path(event.mimeData())
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.schedule_geometry_save()
 
-        if image_path is None:
-            event.ignore()
-            return
+    def moveEvent(self, event):
+        super().moveEvent(event)
+        self.schedule_geometry_save()
 
-        self.imageDropped.emit(str(image_path))
-        event.acceptProposedAction()
+    def hideEvent(self, event):
+        self.save_geometry()
+        super().hideEvent(event)
 
-    def show_response(self, prompt, response, profile_name=None, attachments=None):
-        _ = profile_name
-        self.prompt_label.setText(f"Prompt: {prompt}")
-        self.response_text.setPlainText("" if response is None else str(response))
+    def closeEvent(self, event):
+        self.save_geometry()
+        event.ignore()
+        self.hide()
 
-        attachment = attachments[0] if attachments else None
-        pixmap = attachment.get("pixmap") if isinstance(attachment, dict) else None
+    def show_workspace(self, initial_image_path=None):
+        self.refresh_profile_title()
 
-        if isinstance(pixmap, QPixmap) and not pixmap.isNull():
-            self.attachment_label.setPixmap(
-                pixmap.scaled(
-                    self.attachment_label.size(),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-            )
-            self.attachment_label.show()
-        else:
-            self.attachment_label.clear()
-            self.attachment_label.hide()
+        if initial_image_path:
+            self.attach_image_file(initial_image_path)
 
         self.show()
         self.raise_()
         self.activateWindow()
+        self.focus_prompt_editor()
 
+    def focus_prompt_editor(self):
+        self.prompt_editor.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
-class PromptInputDialog(QDialog):
-    def __init__(self, parent=None, initial_image_path=None):
-        super().__init__(parent)
-        self.setWindowTitle("Prompt Rivet")
-        self.setModal(True)
-        self.setAcceptDrops(True)
-        self.attachment = None
-        self._base_style = self.styleSheet()
+    def refresh_profile_title(self):
+        title = "Rivet Prompt"
 
-        layout = QVBoxLayout(self)
+        try:
+            payload = api_client.get_model_profiles()
+            profiles = payload.get("profiles", {})
+            active_profile = payload.get("active_profile", "")
+            profile = profiles.get(active_profile, {}) if isinstance(profiles, dict) else {}
+            display_name = profile.get("display_name")
 
-        self.prompt_input = QLineEdit(self)
-        self.prompt_input.setPlaceholderText("Ask Rivet...")
-        layout.addWidget(self.prompt_input)
+            if isinstance(display_name, str) and display_name.strip():
+                title = f"Rivet Prompt • {display_name.strip()}"
+        except Exception as e:
+            print(f"Prompt profile title error: {e}")
 
-        attachment_row = QHBoxLayout()
-
-        browse_button = QPushButton("Attach Image", self)
-        browse_button.clicked.connect(self.browse_image)
-        attachment_row.addWidget(browse_button)
-
-        paste_button = QPushButton("Paste Image", self)
-        paste_button.clicked.connect(self.paste_image)
-        attachment_row.addWidget(paste_button)
-
-        self.thumbnail_label = QLabel(self)
-        self.thumbnail_label.setFixedSize(72, 72)
-        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumbnail_label.setText("Drop image")
-        attachment_row.addWidget(self.thumbnail_label)
-
-        self.remove_button = QPushButton("Remove", self)
-        self.remove_button.clicked.connect(self.remove_image)
-        self.remove_button.setEnabled(False)
-        attachment_row.addWidget(self.remove_button)
-
-        layout.addLayout(attachment_row)
-
-        button_row = QHBoxLayout()
-        button_row.addStretch()
-
-        cancel_button = QPushButton("Cancel", self)
-        cancel_button.clicked.connect(self.reject)
-        button_row.addWidget(cancel_button)
-
-        submit_button = QPushButton("OK", self)
-        submit_button.clicked.connect(self.accept)
-        button_row.addWidget(submit_button)
-
-        layout.addLayout(button_row)
-
-        self.prompt_input.returnPressed.connect(self.accept)
-        QTimer.singleShot(0, self.prompt_input.setFocus)
-
-        if initial_image_path:
-            QTimer.singleShot(0, lambda: self.attach_image_file(initial_image_path))
+        self.setWindowTitle(title)
 
     def _set_drop_highlight(self, enabled):
         if enabled:
-            self.setStyleSheet("PromptInputDialog { border: 2px dashed #4f9cff; }")
+            self.setStyleSheet("PromptWindow { border: 2px dashed #4f9cff; }")
         else:
             self.setStyleSheet(self._base_style)
 
@@ -438,6 +482,25 @@ class PromptInputDialog(QDialog):
 
         self.attach_image_file(image_path)
         event.acceptProposedAction()
+
+    def eventFilter(self, watched, event):
+        if watched is self.prompt_editor and event.type() == QEvent.Type.KeyPress:
+            if (
+                event.key() == Qt.Key.Key_V
+                and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+            ):
+                clipboard = QGuiApplication.clipboard()
+                mime_data = clipboard.mimeData()
+
+                if (
+                    _find_first_image_file_path(mime_data) is not None
+                    or mime_data.hasImage()
+                ):
+                    self.paste_image()
+                    event.accept()
+                    return True
+
+        return super().eventFilter(watched, event)
 
     def keyPressEvent(self, event):
         if (
@@ -553,6 +616,7 @@ class PromptInputDialog(QDialog):
         self.set_attachment(payload, pixmap, image_path)
 
     def set_attachment(self, payload, pixmap, file_path):
+        filename = payload.get("name", "image")
         self.attachment = {
             "payload": payload,
             "pixmap": pixmap,
@@ -566,19 +630,23 @@ class PromptInputDialog(QDialog):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+        self.filename_label.setText(filename if isinstance(filename, str) else "image")
+        self.filename_label.show()
         self.remove_button.setEnabled(True)
 
     def remove_image(self):
         self.attachment = None
         self.thumbnail_label.clear()
         self.thumbnail_label.setText("Drop image")
+        self.filename_label.clear()
+        self.filename_label.hide()
         self.remove_button.setEnabled(False)
 
     def _show_image_error(self, message):
         QMessageBox.warning(self, "Image unavailable", message)
 
     def prompt_text(self):
-        return self.prompt_input.text().strip()
+        return self.prompt_editor.toPlainText().strip()
 
     def backend_attachments(self):
         if not self.attachment:
@@ -591,6 +659,29 @@ class PromptInputDialog(QDialog):
             return []
 
         return [self.attachment]
+
+    def submit_prompt(self):
+        prompt = self.prompt_text()
+
+        if not prompt:
+            self.focus_prompt_editor()
+            return
+
+        self.submitRequested.emit(
+            prompt,
+            self.backend_attachments(),
+            self.display_attachments(),
+        )
+
+    def clear_after_successful_submit(self):
+        self.prompt_editor.clear()
+        self.remove_image()
+        self.focus_prompt_editor()
+
+    def show_response(self, prompt, response, profile_name=None, attachments=None):
+        _ = (prompt, profile_name, attachments)
+        self.response_text.setPlainText("" if response is None else str(response))
+        self.show_workspace()
 
 notifications = [
     "New email received.",
@@ -1036,7 +1127,7 @@ class Companion(QLabel):
         self.avatar_size = None
         self.avatar_resized = False
         self.prompt_window = PromptWindow()
-        self.prompt_window.imageDropped.connect(self.open_prompt_dialog)
+        self.prompt_window.submitRequested.connect(self.submit_prompt_from_window)
         self.prompt_shortcut = QShortcut(QKeySequence("Ctrl+Space"), self)
         self.prompt_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.prompt_shortcut.activated.connect(self.open_prompt_dialog)
@@ -1173,6 +1264,7 @@ class Companion(QLabel):
             display_name = str(profile_key).replace("_", " ").title()
 
         self.refresh_model_profiles_menu()
+        self.prompt_window.refresh_profile_title()
         notify(f"Switched to {display_name.strip()} profile.")
 
     def mute_voice(self):
@@ -1659,15 +1751,9 @@ class Companion(QLabel):
         self.context_menu.exec(event.globalPosition().toPoint())
 
     def open_prompt_dialog(self, initial_image_path=None):
-        prompt_dialog = PromptInputDialog(self, initial_image_path=initial_image_path)
+        self.prompt_window.show_workspace(initial_image_path=initial_image_path)
 
-        if prompt_dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-
-        user_prompt = prompt_dialog.prompt_text()
-        attachments = prompt_dialog.backend_attachments()
-        display_attachments = prompt_dialog.display_attachments()
-
+    def submit_prompt_from_window(self, user_prompt, attachments, display_attachments):
         if not user_prompt:
             return
 
@@ -1688,6 +1774,7 @@ class Companion(QLabel):
         )
 
         if phrase is INTERACTION_NOT_STARTED:
+            self.prompt_window.focus_prompt_editor()
             return
 
         print(phrase)
@@ -1697,6 +1784,7 @@ class Companion(QLabel):
             phrase,
             attachments=display_attachments,
         )
+        self.prompt_window.clear_after_successful_submit()
         dispatch_speech(phrase)
 
     def mousePressEvent(self, event):
