@@ -134,7 +134,11 @@ class LlamaCppProvider(LLMProvider):
             self.process = None
             self.started_by_companion = False
 
-    def generate_text(self, prompt: str) -> str | None:
+    def generate_text(
+        self,
+        prompt: str,
+        generation_options: dict[str, Any] | None = None,
+    ) -> str | None:
         start_time = time.perf_counter()
         try:
             if not isinstance(prompt, str) or not prompt.strip():
@@ -144,6 +148,16 @@ class LlamaCppProvider(LLMProvider):
                 "prompt": prompt,
                 "stream": False,
             }
+
+            if isinstance(generation_options, dict):
+                n_predict = generation_options.get("n_predict")
+
+                if (
+                    isinstance(n_predict, int)
+                    and not isinstance(n_predict, bool)
+                    and n_predict > 0
+                ):
+                    payload["n_predict"] = n_predict
 
             request = Request(
                 LLAMA_CPP_COMPLETION_URL,

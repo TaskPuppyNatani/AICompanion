@@ -583,7 +583,7 @@ def chat():
                             click_context
                         )
 
-                        print("LLM CLICK RESPONSE:", repr(llm_click_response))
+                        #print("LLM CLICK RESPONSE:", repr(llm_click_response))
 
                     if has_llm_text(llm_click_response):
                         response = llm_click_response.strip()

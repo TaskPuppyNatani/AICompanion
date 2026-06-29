@@ -98,6 +98,10 @@ class LLMProvider(ABC):
         ...
 
     @abstractmethod
-    def generate_text(self, prompt: str) -> str | None:
+    def generate_text(
+        self,
+        prompt: str,
+        generation_options: dict[str, Any] | None = None,
+    ) -> str | None:
         """Generate a non-streaming response for the prompt."""
         ...

@@ -41,10 +41,14 @@ class LLMService:
             },
         }
 
-    def generate_provider_response(self, prompt: str) -> str | None:
+    def generate_provider_response(
+        self,
+        prompt: str,
+        generation_options: dict[str, Any] | None = None,
+    ) -> str | None:
         """Send a prompt to the active provider and return generated text."""
         provider = get_active_provider()
-        return provider.generate_text(prompt)
+        return provider.generate_text(prompt, generation_options=generation_options)
 
     def is_plain_click_response(self, text: str | None) -> bool:
         """Return whether text is acceptable for an AI click bubble."""
@@ -124,7 +128,10 @@ class LLMService:
                 "Return only one short spoken line from Rivet."
             )
 
-            response = self.generate_provider_response(prompt)
+            response = self.generate_provider_response(
+                prompt,
+                generation_options={"n_predict": 32},
+            )
             if not self.is_plain_click_response(response):
                 return None
             return response.strip()
