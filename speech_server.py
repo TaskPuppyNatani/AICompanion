@@ -88,6 +88,10 @@ def format_response_template(template, **values):
     return str(template).format_map(template_values)
 
 
+def render_personality_template(template):
+    return format_response_template(template)
+
+
 class LazyComponent:
     """Thread-safe lazy initialization for reusable long-lived components.
 
@@ -363,7 +367,7 @@ def get_stt_model():
 def load_personality():
     if PERSONALITY_FILE.exists():
         with open(PERSONALITY_FILE, "r", encoding="utf-8") as f:
-            return f.read()
+            return render_personality_template(f.read())
 
     return ""
 
@@ -966,7 +970,7 @@ def speak():
 
     text = data.get(
         "text",
-        "Hello Pup."
+        format_response_template("Hello, {user}.")
     )
 
     print(f"Generating: {text}", flush=True)
