@@ -1,4 +1,5 @@
 import sys
+import base64
 import winsound
 import random
 import threading
@@ -27,6 +28,7 @@ from PyQt6.QtGui import (
     QPen,
     QColor,
     QTextOption,
+    QImageReader,
 )
 from PyQt6.QtWidgets import (
     QApplication,
@@ -43,8 +45,21 @@ from PyQt6.QtWidgets import (
     QListWidgetItem,
     QLineEdit,
     QTextEdit,
+    QFileDialog,
 )
-from PyQt6.QtCore import Qt, QObject, pyqtSignal, pyqtSlot, QThread, QTimer, QSize, QRectF
+from PyQt6.QtCore import (
+    Qt,
+    QObject,
+    pyqtSignal,
+    pyqtSlot,
+    QThread,
+    QTimer,
+    QSize,
+    QRectF,
+    QByteArray,
+    QBuffer,
+    QIODevice,
+)
 from companion_app.local_notify_server import (
     register_notify_callback,
     start_notification_server,
@@ -78,6 +93,48 @@ speech_server_owned_by_companion = False
 SPEECH_HEALTHCHECK_URL = f"http://{API_HOST}:{API_PORT}/notes/recent"
 SPEECH_STARTUP_TIMEOUT_SEC = 45
 SPEECH_POLL_INTERVAL_SEC = 0.5
+
+PROMPT_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+PROMPT_IMAGE_FORMAT_MIME_TYPES = {
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+}
+PROMPT_IMAGE_FILE_FILTER = "Images (*.png *.jpg *.jpeg *.webp)"
+
+
+def _format_qbytearray(value):
+    try:
+        return bytes(value).decode("ascii", errors="ignore").lower()
+    except Exception:
+        return ""
+
+
+def _attachment_payload_from_image_bytes(image_bytes, mime_type, name):
+    return {
+        "type": "image",
+        "mime_type": mime_type,
+        "data_base64": base64.b64encode(image_bytes).decode("ascii"),
+        "name": name,
+    }
+
+
+def _find_first_image_file_path(mime_data):
+    if mime_data is None or not mime_data.hasUrls():
+        return None
+
+    for url in mime_data.urls():
+        if not url.isLocalFile():
+            continue
+
+        candidate = Path(url.toLocalFile())
+        suffix = candidate.suffix.lower().lstrip(".")
+
+        if suffix in PROMPT_IMAGE_FORMAT_MIME_TYPES:
+            return candidate
+
+    return None
 SPEECH_STARTUP_LOG_MAX_CHARS = 8000
 
 AVATAR_MIN_SIZE = 64
@@ -195,11 +252,13 @@ class ThoughtBubbleWidget(QWidget):
 
 
 class PromptWindow(QWidget):
+    imageDropped = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Rivet Prompt")
         self.resize(720, 520)
+        self.setAcceptDrops(True)
 
         layout = QVBoxLayout(self)
 
@@ -208,9 +267,16 @@ class PromptWindow(QWidget):
         self.prompt_label.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.prompt_label)
 
+        self.attachment_label = QLabel(self)
+        self.attachment_label.setFixedSize(112, 112)
+        self.attachment_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.attachment_label.hide()
+        layout.addWidget(self.attachment_label)
+
         self.response_text = QTextEdit(self)
         self.response_text.setReadOnly(True)
         self.response_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        self._response_base_style = self.response_text.styleSheet()
         layout.addWidget(self.response_text)
 
         button_layout = QHBoxLayout()
@@ -226,13 +292,303 @@ class PromptWindow(QWidget):
         self.escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.escape_shortcut.activated.connect(self.hide)
 
-    def show_response(self, prompt, response, profile_name=None):
+    def _set_drop_highlight(self, enabled):
+        if enabled:
+            self.response_text.setStyleSheet("QTextEdit { border: 2px dashed #4f9cff; }")
+        else:
+            self.response_text.setStyleSheet(self._response_base_style)
+
+    def dragEnterEvent(self, event):
+        image_path = _find_first_image_file_path(event.mimeData())
+
+        if image_path is None:
+            event.ignore()
+            return
+
+        self._set_drop_highlight(True)
+        event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self._set_drop_highlight(False)
+        event.accept()
+
+    def dropEvent(self, event):
+        self._set_drop_highlight(False)
+        image_path = _find_first_image_file_path(event.mimeData())
+
+        if image_path is None:
+            event.ignore()
+            return
+
+        self.imageDropped.emit(str(image_path))
+        event.acceptProposedAction()
+
+    def show_response(self, prompt, response, profile_name=None, attachments=None):
         _ = profile_name
         self.prompt_label.setText(f"Prompt: {prompt}")
         self.response_text.setPlainText("" if response is None else str(response))
+
+        attachment = attachments[0] if attachments else None
+        pixmap = attachment.get("pixmap") if isinstance(attachment, dict) else None
+
+        if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+            self.attachment_label.setPixmap(
+                pixmap.scaled(
+                    self.attachment_label.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            self.attachment_label.show()
+        else:
+            self.attachment_label.clear()
+            self.attachment_label.hide()
+
         self.show()
         self.raise_()
         self.activateWindow()
+
+
+class PromptInputDialog(QDialog):
+    def __init__(self, parent=None, initial_image_path=None):
+        super().__init__(parent)
+        self.setWindowTitle("Prompt Rivet")
+        self.setModal(True)
+        self.setAcceptDrops(True)
+        self.attachment = None
+        self._base_style = self.styleSheet()
+
+        layout = QVBoxLayout(self)
+
+        self.prompt_input = QLineEdit(self)
+        self.prompt_input.setPlaceholderText("Ask Rivet...")
+        layout.addWidget(self.prompt_input)
+
+        attachment_row = QHBoxLayout()
+
+        browse_button = QPushButton("Attach Image", self)
+        browse_button.clicked.connect(self.browse_image)
+        attachment_row.addWidget(browse_button)
+
+        paste_button = QPushButton("Paste Image", self)
+        paste_button.clicked.connect(self.paste_image)
+        attachment_row.addWidget(paste_button)
+
+        self.thumbnail_label = QLabel(self)
+        self.thumbnail_label.setFixedSize(72, 72)
+        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail_label.setText("Drop image")
+        attachment_row.addWidget(self.thumbnail_label)
+
+        self.remove_button = QPushButton("Remove", self)
+        self.remove_button.clicked.connect(self.remove_image)
+        self.remove_button.setEnabled(False)
+        attachment_row.addWidget(self.remove_button)
+
+        layout.addLayout(attachment_row)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+
+        cancel_button = QPushButton("Cancel", self)
+        cancel_button.clicked.connect(self.reject)
+        button_row.addWidget(cancel_button)
+
+        submit_button = QPushButton("OK", self)
+        submit_button.clicked.connect(self.accept)
+        button_row.addWidget(submit_button)
+
+        layout.addLayout(button_row)
+
+        self.prompt_input.returnPressed.connect(self.accept)
+        QTimer.singleShot(0, self.prompt_input.setFocus)
+
+        if initial_image_path:
+            QTimer.singleShot(0, lambda: self.attach_image_file(initial_image_path))
+
+    def _set_drop_highlight(self, enabled):
+        if enabled:
+            self.setStyleSheet("PromptInputDialog { border: 2px dashed #4f9cff; }")
+        else:
+            self.setStyleSheet(self._base_style)
+
+    def dragEnterEvent(self, event):
+        image_path = _find_first_image_file_path(event.mimeData())
+
+        if image_path is None:
+            event.ignore()
+            return
+
+        self._set_drop_highlight(True)
+        event.acceptProposedAction()
+
+    def dragLeaveEvent(self, event):
+        self._set_drop_highlight(False)
+        event.accept()
+
+    def dropEvent(self, event):
+        self._set_drop_highlight(False)
+        image_path = _find_first_image_file_path(event.mimeData())
+
+        if image_path is None:
+            event.ignore()
+            return
+
+        self.attach_image_file(image_path)
+        event.acceptProposedAction()
+
+    def keyPressEvent(self, event):
+        if (
+            event.key() == Qt.Key.Key_V
+            and event.modifiers() & Qt.KeyboardModifier.ControlModifier
+        ):
+            clipboard = QGuiApplication.clipboard()
+            mime_data = clipboard.mimeData()
+
+            if _find_first_image_file_path(mime_data) is not None or mime_data.hasImage():
+                self.paste_image()
+                event.accept()
+                return
+
+        super().keyPressEvent(event)
+
+    def browse_image(self):
+        file_name, _ = QFileDialog.getOpenFileName(
+            self,
+            "Attach Image",
+            "",
+            PROMPT_IMAGE_FILE_FILTER,
+        )
+
+        if file_name:
+            self.attach_image_file(file_name)
+
+    def paste_image(self):
+        clipboard = QGuiApplication.clipboard()
+        mime_data = clipboard.mimeData()
+        image_path = _find_first_image_file_path(mime_data)
+
+        if image_path is not None:
+            self.attach_image_file(image_path)
+            return
+
+        image = clipboard.image()
+
+        if image.isNull():
+            self._show_image_error("Clipboard does not contain a supported image.")
+            return
+
+        byte_array = QByteArray()
+        buffer = QBuffer(byte_array)
+        buffer.open(QIODevice.OpenModeFlag.WriteOnly)
+
+        if not image.save(buffer, "PNG"):
+            self._show_image_error("Could not read the clipboard image.")
+            return
+
+        image_bytes = bytes(byte_array)
+
+        if len(image_bytes) > PROMPT_IMAGE_MAX_BYTES:
+            self._show_image_error(
+                "Image is too large. Please use an image smaller than 8 MB."
+            )
+            return
+
+        payload = _attachment_payload_from_image_bytes(
+            image_bytes,
+            "image/png",
+            "clipboard.png",
+        )
+        pixmap = QPixmap.fromImage(image)
+        self.set_attachment(payload, pixmap, None)
+
+    def attach_image_file(self, file_path):
+        image_path = Path(file_path)
+
+        if not image_path.is_file():
+            self._show_image_error("Image file could not be found.")
+            return
+
+        try:
+            file_size = image_path.stat().st_size
+        except OSError:
+            self._show_image_error("Image file could not be read.")
+            return
+
+        if file_size > PROMPT_IMAGE_MAX_BYTES:
+            self._show_image_error(
+                "Image is too large. Please use an image smaller than 8 MB."
+            )
+            return
+
+        reader = QImageReader(str(image_path))
+        reader.setAutoTransform(True)
+        image_format = _format_qbytearray(reader.format())
+        mime_type = PROMPT_IMAGE_FORMAT_MIME_TYPES.get(image_format)
+
+        if mime_type is None:
+            self._show_image_error("Unsupported image type. Use PNG, JPEG, or WebP.")
+            return
+
+        image = reader.read()
+
+        if image.isNull():
+            self._show_image_error("Image file could not be decoded.")
+            return
+
+        try:
+            image_bytes = image_path.read_bytes()
+        except OSError:
+            self._show_image_error("Image file could not be read.")
+            return
+
+        payload = _attachment_payload_from_image_bytes(
+            image_bytes,
+            mime_type,
+            image_path.name,
+        )
+        pixmap = QPixmap.fromImage(image)
+        self.set_attachment(payload, pixmap, image_path)
+
+    def set_attachment(self, payload, pixmap, file_path):
+        self.attachment = {
+            "payload": payload,
+            "pixmap": pixmap,
+            "path": str(file_path) if file_path is not None else None,
+        }
+        self.thumbnail_label.setText("")
+        self.thumbnail_label.setPixmap(
+            pixmap.scaled(
+                self.thumbnail_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        self.remove_button.setEnabled(True)
+
+    def remove_image(self):
+        self.attachment = None
+        self.thumbnail_label.clear()
+        self.thumbnail_label.setText("Drop image")
+        self.remove_button.setEnabled(False)
+
+    def _show_image_error(self, message):
+        QMessageBox.warning(self, "Image unavailable", message)
+
+    def prompt_text(self):
+        return self.prompt_input.text().strip()
+
+    def backend_attachments(self):
+        if not self.attachment:
+            return []
+
+        return [self.attachment["payload"]]
+
+    def display_attachments(self):
+        if not self.attachment:
+            return []
+
+        return [self.attachment]
 
 notifications = [
     "New email received.",
@@ -678,6 +1034,7 @@ class Companion(QLabel):
         self.avatar_size = None
         self.avatar_resized = False
         self.prompt_window = PromptWindow()
+        self.prompt_window.imageDropped.connect(self.open_prompt_dialog)
         self.prompt_shortcut = QShortcut(QKeySequence("Ctrl+Space"), self)
         self.prompt_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.prompt_shortcut.activated.connect(self.open_prompt_dialog)
@@ -1299,33 +1656,31 @@ class Companion(QLabel):
     def show_context_menu(self, event):
         self.context_menu.exec(event.globalPosition().toPoint())
 
-    def open_prompt_dialog(self):
-        prompt_dialog = QDialog(self)
-        prompt_dialog.setWindowTitle("Prompt Rivet")
-        prompt_dialog.setModal(True)
-
-        layout = QVBoxLayout(prompt_dialog)
-        prompt_input = QLineEdit(prompt_dialog)
-        prompt_input.setPlaceholderText("Ask Rivet...")
-        layout.addWidget(prompt_input)
-
-        prompt_input.returnPressed.connect(prompt_dialog.accept)
-
-        QTimer.singleShot(0, prompt_input.setFocus)
+    def open_prompt_dialog(self, initial_image_path=None):
+        prompt_dialog = PromptInputDialog(self, initial_image_path=initial_image_path)
 
         if prompt_dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        user_prompt = prompt_input.text().strip()
+        user_prompt = prompt_dialog.prompt_text()
+        attachments = prompt_dialog.backend_attachments()
+        display_attachments = prompt_dialog.display_attachments()
 
         if not user_prompt:
             return
+
+        interaction_data = {
+            "prompt": user_prompt,
+        }
+
+        if attachments:
+            interaction_data["attachments"] = attachments
 
         phrase = interaction_manager.execute_interaction(
             "prompt",
             lambda: ask_ratchet(
                 "prompt",
-                interaction_data={"prompt": user_prompt}
+                interaction_data=interaction_data,
             ),
             prompt=user_prompt
         )
@@ -1335,7 +1690,11 @@ class Companion(QLabel):
 
         print(phrase)
 
-        self.prompt_window.show_response(user_prompt, phrase)
+        self.prompt_window.show_response(
+            user_prompt,
+            phrase,
+            attachments=display_attachments,
+        )
         dispatch_speech(phrase)
 
     def mousePressEvent(self, event):

@@ -43,12 +43,44 @@ class LLMService:
 
     def generate_provider_response(
         self,
-        messages: list[dict[str, str]],
+        messages: list[dict[str, Any]],
         generation_options: dict[str, Any] | None = None,
     ) -> str | None:
         """Send provider-neutral messages to the active provider."""
         provider = get_active_provider()
         return provider.generate_text(messages, generation_options=generation_options)
+
+    def build_prompt_user_content(
+        self,
+        prompt_text: str,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> str | list[dict[str, Any]]:
+        """Build provider-neutral user content for text or multimodal prompts."""
+        if not attachments:
+            return prompt_text
+
+        content_parts: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": prompt_text,
+            }
+        ]
+
+        for attachment in attachments:
+            if not isinstance(attachment, dict):
+                continue
+
+            if attachment.get("type") != "image":
+                continue
+
+            content_parts.append({
+                "type": "image",
+                "mime_type": attachment.get("mime_type", ""),
+                "data_base64": attachment.get("data_base64", ""),
+                "name": attachment.get("name", "image"),
+            })
+
+        return content_parts
 
     def is_plain_click_response(self, text: str | None) -> bool:
         """Return whether text is acceptable for an AI click bubble."""
@@ -149,6 +181,7 @@ class LLMService:
         self,
         user_prompt: str,
         context: dict[str, Any],
+        attachments: list[dict[str, Any]] | None = None,
     ) -> str | None:
         """Generate a response to an explicit user prompt."""
         try:
@@ -169,7 +202,13 @@ class LLMService:
         )
         messages = [
             {"role": "system", "content": system_message},
-            {"role": "user", "content": prompt_text},
+            {
+                "role": "user",
+                "content": self.build_prompt_user_content(
+                    prompt_text,
+                    attachments=attachments,
+                ),
+            },
         ]
 
         response = self.generate_provider_response(messages)

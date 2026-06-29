@@ -135,9 +135,78 @@ class LlamaCppProvider(LLMProvider):
             self.process = None
             self.started_by_companion = False
 
+    def supports_image_input(self) -> bool:
+        category = self.profile.get("category")
+
+        if isinstance(category, str) and category.strip().lower() == "vision":
+            return True
+
+        mmproj = self.profile.get("mmproj")
+        return isinstance(mmproj, str) and bool(mmproj.strip())
+
+    def build_chat_completion_messages(
+        self,
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        chat_messages: list[dict[str, Any]] = []
+
+        for message in messages:
+            role = message.get("role", "user")
+            content = message.get("content", "")
+
+            if not isinstance(content, list):
+                chat_messages.append({
+                    "role": role,
+                    "content": content,
+                })
+                continue
+
+            content_parts: list[dict[str, Any]] = []
+
+            for part in content:
+                if not isinstance(part, dict):
+                    continue
+
+                if part.get("type") == "text":
+                    text = part.get("text")
+
+                    if isinstance(text, str) and text.strip():
+                        content_parts.append({
+                            "type": "text",
+                            "text": text.strip(),
+                        })
+
+                elif part.get("type") == "image":
+                    mime_type = part.get("mime_type")
+                    data_base64 = part.get("data_base64")
+
+                    if (
+                        isinstance(mime_type, str)
+                        and mime_type.strip()
+                        and isinstance(data_base64, str)
+                        and data_base64.strip()
+                    ):
+                        content_parts.append({
+                            "type": "image_url",
+                            "image_url": {
+                                "url": (
+                                    f"data:{mime_type.strip()};"
+                                    f"base64,{data_base64.strip()}"
+                                ),
+                            },
+                        })
+
+            if content_parts:
+                chat_messages.append({
+                    "role": role,
+                    "content": content_parts,
+                })
+
+        return chat_messages
+
     def generate_text(
         self,
-        messages: list[dict[str, str]] | str,
+        messages: list[dict[str, Any]] | str,
         generation_options: dict[str, Any] | None = None,
     ) -> str | None:
         start_time = time.perf_counter()
@@ -148,10 +217,20 @@ class LlamaCppProvider(LLMProvider):
                 return None
 
             prompt_format = self.profile.get("prompt_format", "completion")
+            has_image = self.messages_include_image(normalized_messages)
+
+            if has_image and (prompt_format != "chat" or not self.supports_image_input()):
+                print("LLAMA.CPP FAILED: image input is not supported by this profile")
+                return None
 
             if prompt_format == "chat":
+                chat_messages = self.build_chat_completion_messages(normalized_messages)
+
+                if not chat_messages:
+                    return None
+
                 payload = {
-                    "messages": normalized_messages,
+                    "messages": chat_messages,
                     "stream": False,
                 }
                 request_url = LLAMA_CPP_CHAT_COMPLETIONS_URL

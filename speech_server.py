@@ -1,5 +1,7 @@
 from flask import Flask, request, send_file, jsonify
 import atexit
+import base64
+import binascii
 import numpy as np
 import re
 import soundfile as sf
@@ -38,7 +40,7 @@ from speech_data.chat_data import (
 )
 from speech_data.intent_router import IntentRouter
 from speech_data.llm_service import LLMService
-from speech_data.profile_manager import use_profile
+from speech_data.profile_manager import get_active_profile, use_profile
 from speech_data.provider_lifecycle import (
     get_provider_for_active_profile,
     stop_active_provider,
@@ -59,6 +61,10 @@ app = Flask(__name__)
 
 stt_model = None
 stt_model_lock = threading.Lock()
+
+PROMPT_IMAGE_MAX_BYTES = 8 * 1024 * 1024
+PROMPT_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
+IMAGE_PROMPT_UNAVAILABLE_RESPONSE = "Image prompts require the Vision profile."
 
 
 class LazyComponent:
@@ -109,6 +115,72 @@ class LazyComponent:
 
             self.state = self.READY
             return self.instance
+
+
+def profile_supports_image_input(profile):
+    if not isinstance(profile, dict):
+        return False
+
+    category = profile.get("category")
+    if isinstance(category, str) and category.strip().lower() == "vision":
+        return True
+
+    mmproj = profile.get("mmproj")
+    return isinstance(mmproj, str) and bool(mmproj.strip())
+
+
+def validate_prompt_attachments(raw_attachments):
+    if raw_attachments in (None, ""):
+        return [], None
+
+    if not isinstance(raw_attachments, list):
+        return [], "Image attachment data was invalid."
+
+    if len(raw_attachments) > 1:
+        return [], "Only one image attachment is supported right now."
+
+    validated_attachments = []
+
+    for raw_attachment in raw_attachments:
+        if not isinstance(raw_attachment, dict):
+            return [], "Image attachment data was invalid."
+
+        attachment_type = raw_attachment.get("type")
+        mime_type = raw_attachment.get("mime_type")
+        data_base64 = raw_attachment.get("data_base64")
+        name = raw_attachment.get("name", "image")
+
+        if attachment_type != "image":
+            return [], "Only image attachments are supported right now."
+
+        if mime_type not in PROMPT_IMAGE_MIME_TYPES:
+            return [], "Unsupported image type. Use PNG, JPEG, or WebP."
+
+        if not isinstance(data_base64, str) or not data_base64.strip():
+            return [], "Image attachment data was invalid."
+
+        try:
+            image_bytes = base64.b64decode(data_base64, validate=True)
+        except (binascii.Error, ValueError):
+            return [], "Image attachment data was invalid."
+
+        if not image_bytes:
+            return [], "Image attachment data was invalid."
+
+        if len(image_bytes) > PROMPT_IMAGE_MAX_BYTES:
+            return [], "Image is too large. Please use an image smaller than 8 MB."
+
+        if not isinstance(name, str) or not name.strip():
+            name = "image"
+
+        validated_attachments.append({
+            "type": "image",
+            "mime_type": mime_type,
+            "data_base64": data_base64.strip(),
+            "name": name.strip(),
+        })
+
+    return validated_attachments, None
 
 
 def load_notes():
@@ -433,6 +505,10 @@ def chat():
         else:
             user_prompt = ""
 
+        prompt_attachments, attachment_error = validate_prompt_attachments(
+            data.get("attachments")
+        )
+
         latest_note_text_cache = None
 
         def get_latest_note_text_for_context():
@@ -500,23 +576,43 @@ def chat():
             chat_stage = "prompt_branch"
 
             prompt_context = build_llm_context()
-            tool_response = tool_manager.handle(user_prompt, prompt_context)
 
-            if has_llm_text(tool_response):
-                response = tool_response.strip()
-            else:
-                routed_profile = intent_router.route(user_prompt, prompt_context)
+            if attachment_error:
+                response = attachment_error
+            elif prompt_attachments:
+                active_profile = get_active_profile()
 
-                with use_profile(routed_profile):
+                if not profile_supports_image_input(active_profile):
+                    response = IMAGE_PROMPT_UNAVAILABLE_RESPONSE
+                else:
                     llm_prompt_response = llm_service.generate_prompt_response(
                         user_prompt,
-                        prompt_context
+                        prompt_context,
+                        attachments=prompt_attachments,
                     )
 
-                if has_llm_text(llm_prompt_response):
-                    response = llm_prompt_response.strip()
+                    if has_llm_text(llm_prompt_response):
+                        response = llm_prompt_response.strip()
+                    else:
+                        response = "Ratchet seems to be thinking too hard right now."
+            else:
+                tool_response = tool_manager.handle(user_prompt, prompt_context)
+
+                if has_llm_text(tool_response):
+                    response = tool_response.strip()
                 else:
-                    response = "Ratchet seems to be thinking too hard right now."
+                    routed_profile = intent_router.route(user_prompt, prompt_context)
+
+                    with use_profile(routed_profile):
+                        llm_prompt_response = llm_service.generate_prompt_response(
+                            user_prompt,
+                            prompt_context
+                        )
+
+                    if has_llm_text(llm_prompt_response):
+                        response = llm_prompt_response.strip()
+                    else:
+                        response = "Ratchet seems to be thinking too hard right now."
 
         elif event == "startup":
             chat_stage = "startup_branch"

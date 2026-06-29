@@ -100,16 +100,62 @@ class LLMProvider(ABC):
     @abstractmethod
     def generate_text(
         self,
-        messages: list[dict[str, str]] | str,
+        messages: list[dict[str, Any]] | str,
         generation_options: dict[str, Any] | None = None,
     ) -> str | None:
         """Generate a non-streaming response for the prompt."""
         ...
 
+    def normalize_content_parts(
+        self,
+        content: list[Any],
+    ) -> list[dict[str, Any]]:
+        normalized_parts: list[dict[str, Any]] = []
+
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+
+            part_type = part.get("type")
+
+            if part_type == "text":
+                text = part.get("text", "")
+
+                if not isinstance(text, str):
+                    text = str(text or "")
+
+                text = text.strip()
+
+                if text:
+                    normalized_parts.append({
+                        "type": "text",
+                        "text": text,
+                    })
+
+            elif part_type == "image":
+                mime_type = part.get("mime_type")
+                data_base64 = part.get("data_base64")
+                name = part.get("name", "image")
+
+                if (
+                    isinstance(mime_type, str)
+                    and mime_type.strip()
+                    and isinstance(data_base64, str)
+                    and data_base64.strip()
+                ):
+                    normalized_parts.append({
+                        "type": "image",
+                        "mime_type": mime_type.strip(),
+                        "data_base64": data_base64.strip(),
+                        "name": name.strip() if isinstance(name, str) and name.strip() else "image",
+                    })
+
+        return normalized_parts
+
     def normalize_messages(
         self,
-        messages: list[dict[str, str]] | str,
-    ) -> list[dict[str, str]]:
+        messages: list[dict[str, Any]] | str,
+    ) -> list[dict[str, Any]]:
         """Normalize provider-neutral messages into role/content dictionaries."""
         if isinstance(messages, str):
             content = messages.strip()
@@ -118,7 +164,7 @@ class LLMProvider(ABC):
         if not isinstance(messages, list):
             return []
 
-        normalized_messages: list[dict[str, str]] = []
+        normalized_messages: list[dict[str, Any]] = []
 
         for message in messages:
             if not isinstance(message, dict):
@@ -130,23 +176,48 @@ class LLMProvider(ABC):
             if not isinstance(role, str):
                 role = "user"
 
+            role = role.strip().lower() or "user"
+
+            if isinstance(content, list):
+                content_parts = self.normalize_content_parts(content)
+
+                if content_parts:
+                    normalized_messages.append({
+                        "role": role,
+                        "content": content_parts,
+                    })
+                continue
+
             if not isinstance(content, str):
                 content = str(content or "")
 
-            role = role.strip().lower() or "user"
-            content = content.strip()
+            text_content = content.strip()
 
-            if content:
+            if text_content:
                 normalized_messages.append({
                     "role": role,
-                    "content": content,
+                    "content": text_content,
                 })
 
         return normalized_messages
 
+    def messages_include_image(self, messages: list[dict[str, Any]] | str) -> bool:
+        normalized_messages = self.normalize_messages(messages)
+
+        for message in normalized_messages:
+            content = message.get("content")
+
+            if not isinstance(content, list):
+                continue
+
+            if any(part.get("type") == "image" for part in content if isinstance(part, dict)):
+                return True
+
+        return False
+
     def render_messages_as_prompt(
         self,
-        messages: list[dict[str, str]] | str,
+        messages: list[dict[str, Any]] | str,
     ) -> str:
         """Render provider-neutral messages into a raw completion prompt."""
         normalized_messages = self.normalize_messages(messages)
@@ -155,6 +226,26 @@ class LLMProvider(ABC):
         for message in normalized_messages:
             role = message["role"]
             content = message["content"]
+
+            if isinstance(content, list):
+                text_parts = [
+                    part["text"]
+                    for part in content
+                    if isinstance(part, dict)
+                    and part.get("type") == "text"
+                    and isinstance(part.get("text"), str)
+                    and part.get("text").strip()
+                ]
+                content = "\n".join(text_parts).strip()
+
+                if any(
+                    isinstance(part, dict) and part.get("type") == "image"
+                    for part in message["content"]
+                ):
+                    return ""
+
+            if not isinstance(content, str) or not content.strip():
+                continue
 
             if role == "system":
                 prompt_parts.append(content)

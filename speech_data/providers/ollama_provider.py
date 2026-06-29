@@ -118,7 +118,7 @@ class OllamaProvider(LLMProvider):
 
     def generate_text(
         self,
-        messages: list[dict[str, str]] | str,
+        messages: list[dict[str, Any]] | str,
         generation_options: dict[str, Any] | None = None,
     ) -> str | None:
         start_time = time.perf_counter()
