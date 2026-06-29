@@ -74,6 +74,7 @@ from companion_app.windows_notification_listener import (
 
 from config_store import (
     config,
+    get_config_value,
     saved_avatar_position,
     save_avatar_position,
     set_config_value,
@@ -1996,6 +1997,9 @@ class CompanionApplication:
         app = QApplication(sys.argv)
         self.app = app
 
+        if not self._ensure_preferred_name_configured():
+            sys.exit(0)
+
         self._ensure_speech_server_ready()
 
         self._wire_notification_callbacks()
@@ -2010,6 +2014,77 @@ class CompanionApplication:
     def _wire_notification_callbacks(self):
         bridge.notify_signal.connect(notify)
         register_notify_callback(bridge.notify_signal.emit)
+
+    def _ensure_preferred_name_configured(self):
+        preferred_name = get_config_value("preferred_name")
+
+        if isinstance(preferred_name, str) and preferred_name.strip():
+            return True
+
+        while True:
+            preferred_name = self._prompt_for_preferred_name()
+
+            if preferred_name:
+                set_config_value("preferred_name", preferred_name)
+                return True
+
+            exit_choice = QMessageBox.question(
+                None,
+                "Exit Rivet?",
+                (
+                    "Rivet requires a preferred name before first use.\n\n"
+                    "Would you like to exit Rivet for now?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+
+            if exit_choice == QMessageBox.StandardButton.Yes:
+                return False
+
+    def _prompt_for_preferred_name(self):
+        dialog = QDialog()
+        dialog.setWindowTitle("Welcome to Rivet")
+        dialog.setModal(True)
+
+        layout = QVBoxLayout(dialog)
+
+        welcome_label = QLabel(
+            "Welcome to Rivet!\n\n"
+            "Before we get started, what would you like me to call you?\n\n"
+            "This can be a name or nickname."
+        )
+        welcome_label.setWordWrap(True)
+        layout.addWidget(welcome_label)
+
+        name_input = QLineEdit()
+        name_input.setPlaceholderText("Preferred name or nickname")
+        layout.addWidget(name_input)
+
+        button_row = QHBoxLayout()
+        cancel_button = QPushButton("Cancel")
+        confirm_button = QPushButton("Continue")
+        confirm_button.setEnabled(False)
+        button_row.addStretch(1)
+        button_row.addWidget(cancel_button)
+        button_row.addWidget(confirm_button)
+        layout.addLayout(button_row)
+
+        name_input.textChanged.connect(
+            lambda text: confirm_button.setEnabled(bool(text.strip()))
+        )
+        cancel_button.clicked.connect(dialog.reject)
+        confirm_button.clicked.connect(dialog.accept)
+        name_input.returnPressed.connect(
+            lambda: dialog.accept() if confirm_button.isEnabled() else None
+        )
+
+        name_input.setFocus()
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            return name_input.text().strip()
+
+        return None
 
     def _ensure_speech_server_ready(self):
         global speech_server_process

@@ -14,6 +14,7 @@ DEFAULT_CONFIG = {
     "avatar_size": 150,
     "notification_duration": 5000,
     "voice_enabled": True,
+    "preferred_name": None,
     "avatar_position": None,
     "active_model_profile": "fast-chat",
     "model_profiles": {
@@ -53,6 +54,12 @@ else:
 
 if not isinstance(config.get("voice_enabled", True), bool):
     config["voice_enabled"] = True
+
+if config.get("preferred_name") is not None:
+    if isinstance(config["preferred_name"], str):
+        config["preferred_name"] = config["preferred_name"].strip() or None
+    else:
+        config["preferred_name"] = None
 
 if (
     type(config.get("avatar_size")) is not int

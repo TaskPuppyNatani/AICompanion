@@ -5,7 +5,7 @@ CLICK_RESPONSES = [
     "I approve of this level of attention.",
     "I've logged this interaction as completely intentional.",
     "You're very determined for someone clicking a lombax.",
-    "Diagnostic complete. Result: Pup clicked me again.",
+    "Diagnostic complete. Result: {user} clicked me again.",
     "Ratchet would probably call this testing.",
     "I can confirm the click still works.",
     "That's another data point for the click study.",
@@ -25,8 +25,8 @@ CLICK_RESPONSES = [
     "You're remarkably committed to this process."
 ]
 
-CLICK_MEMORY_RESPONSES = [
-    "Pup, about that note: '{note}'...",
+CLICK_NOTE_RESPONSES = [
+    "{user}, about that note: '{note}'...",
     "I noticed you wrote down '{note}'.",
     "Should I be concerned that '{note}' is still on the list?",
     "My records indicate: '{note}'."
@@ -37,14 +37,14 @@ CLICK_MILESTONES = {
     10: "Ten clicks already? You're either testing me or entertaining yourself.",
     25: "Twenty-five clicks. I suspect a pattern is emerging.",
     50: "Fifty clicks. This is becoming a statistically significant sample size.",
-    100: "One hundred clicks. Pup, you've discovered my primary purpose in life.",
+    100: "One hundred clicks. {user}, you've discovered my primary purpose in life.",
     250: "Two hundred and fifty clicks. At this point I'm basically a click-powered lifeform.",
     500: "Five hundred clicks. Ratchet would call this dedication. Clank would call it data.",
-    1000: "Pup, if you click me one more time, I'm logging it as a scientific experiment."
+    1000: "{user}, if you click me one more time, I'm logging it as a scientific experiment."
 }
 
 STARTUP_RESPONSES = [
-    "Good morning, Pup.",
+    "Good morning, {user}.",
     "Systems online and ready.",
     "Ratchet and I are standing by.",
     "Ready for another day of tinkering?"

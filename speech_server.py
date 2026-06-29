@@ -32,12 +32,13 @@ from config import (
 from speech_data.notes_data import NOTE_CONFIRMATIONS, CATEGORY_KEYWORDS
 from speech_data.chat_data import (
     CLICK_RESPONSES,
-    CLICK_MEMORY_RESPONSES,
+    CLICK_NOTE_RESPONSES,
     CLICK_MILESTONES,
     STARTUP_RESPONSES,
     DISCORD_RESPONSES,
     DISCORD_SENDER_RESPONSES,
 )
+from config_store import get_config_value
 from speech_data.intent_router import IntentRouter
 from speech_data.llm_service import LLMService
 from speech_data.profile_manager import get_active_profile, use_profile
@@ -65,6 +66,26 @@ stt_model_lock = threading.Lock()
 PROMPT_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 PROMPT_IMAGE_MIME_TYPES = {"image/png", "image/jpeg", "image/webp"}
 IMAGE_PROMPT_UNAVAILABLE_RESPONSE = "Image prompts require the Vision profile."
+
+
+class ResponseTemplateValues(dict):
+    def __missing__(self, key):
+        return "{" + key + "}"
+
+
+def preferred_user_name():
+    preferred_name = get_config_value("preferred_name")
+
+    if isinstance(preferred_name, str) and preferred_name.strip():
+        return preferred_name.strip()
+
+    return "friend"
+
+
+def format_response_template(template, **values):
+    template_values = ResponseTemplateValues(values)
+    template_values["user"] = preferred_user_name()
+    return str(template).format_map(template_values)
 
 
 class LazyComponent:
@@ -559,16 +580,23 @@ def chat():
 
         save_memory(memory)
 
-        click_responses = CLICK_RESPONSES
-        startup_responses = STARTUP_RESPONSES
+        click_responses = [
+            format_response_template(message)
+            for message in CLICK_RESPONSES
+        ]
+
+        startup_responses = [
+            format_response_template(message)
+            for message in STARTUP_RESPONSES
+        ]
 
         discord_responses = [
-            message.format(sender=sender)
+            format_response_template(message, sender=sender)
             for message in DISCORD_RESPONSES
         ]
 
         discord_sender_responses = [
-            message.format(sender=sender)
+            format_response_template(message, sender=sender)
             for message in DISCORD_SENDER_RESPONSES
         ]
 
@@ -641,7 +669,7 @@ def chat():
                 milestone_response = CLICK_MILESTONES.get(memory["click_count"])
 
             if milestone_response is not None:
-                response = milestone_response
+                response = format_response_template(milestone_response)
 
             else:
                 chat_stage = "click_latest_note"
@@ -663,8 +691,11 @@ def chat():
                     if has_llm_text(llm_memory_response):
                         response = llm_memory_response.strip()
                     else:
-                        template = random.choice(CLICK_MEMORY_RESPONSES)
-                        response = template.format(note=latest_note_text)
+                        template = random.choice(CLICK_NOTE_RESPONSES)
+                        response = format_response_template(
+                            template,
+                            note=latest_note_text,
+                        )
                 else:
 
                     llm_click_response = None
