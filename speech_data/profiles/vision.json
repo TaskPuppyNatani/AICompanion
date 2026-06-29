@@ -4,6 +4,7 @@
     "provider": "llama_cpp",
     "model": "models/vision/qwen-vision.gguf",
     "mmproj": "models/vision/qwen-vision-mmproj.gguf",
+    "prompt_format": "chat",
     "startup_timeout_seconds": 40,
     "settings": {
         "context": 32768,

@@ -9,6 +9,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from config import (
+    LLAMA_CPP_CHAT_COMPLETIONS_URL,
     LLAMA_CPP_COMPLETION_URL,
     LLAMA_CPP_HEALTH_URL,
     LLAMA_CPP_HOST,
@@ -136,18 +137,35 @@ class LlamaCppProvider(LLMProvider):
 
     def generate_text(
         self,
-        prompt: str,
+        messages: list[dict[str, str]] | str,
         generation_options: dict[str, Any] | None = None,
     ) -> str | None:
         start_time = time.perf_counter()
         try:
-            if not isinstance(prompt, str) or not prompt.strip():
+            normalized_messages = self.normalize_messages(messages)
+
+            if not normalized_messages:
                 return None
 
-            payload = {
-                "prompt": prompt,
-                "stream": False,
-            }
+            prompt_format = self.profile.get("prompt_format", "completion")
+
+            if prompt_format == "chat":
+                payload = {
+                    "messages": normalized_messages,
+                    "stream": False,
+                }
+                request_url = LLAMA_CPP_CHAT_COMPLETIONS_URL
+            else:
+                prompt = self.render_messages_as_prompt(normalized_messages)
+
+                if not prompt:
+                    return None
+
+                payload = {
+                    "prompt": prompt,
+                    "stream": False,
+                }
+                request_url = LLAMA_CPP_COMPLETION_URL
 
             if isinstance(generation_options, dict):
                 n_predict = generation_options.get("n_predict")
@@ -157,10 +175,13 @@ class LlamaCppProvider(LLMProvider):
                     and not isinstance(n_predict, bool)
                     and n_predict > 0
                 ):
-                    payload["n_predict"] = n_predict
+                    if prompt_format == "chat":
+                        payload["max_tokens"] = n_predict
+                    else:
+                        payload["n_predict"] = n_predict
 
             request = Request(
-                LLAMA_CPP_COMPLETION_URL,
+                request_url,
                 data=json.dumps(payload).encode("utf-8"),
                 headers={"Content-Type": "application/json"},
                 method="POST",
@@ -179,7 +200,20 @@ class LlamaCppProvider(LLMProvider):
                 print("LLAMA.CPP FAILED:", repr(e))
                 return None
 
-            generated_text = parsed.get("content")
+            if prompt_format == "chat":
+                choices = parsed.get("choices")
+                generated_text = None
+
+                if isinstance(choices, list) and choices:
+                    first_choice = choices[0]
+
+                    if isinstance(first_choice, dict):
+                        message = first_choice.get("message")
+
+                        if isinstance(message, dict):
+                            generated_text = message.get("content")
+            else:
+                generated_text = parsed.get("content")
 
             if not isinstance(generated_text, str):
                 return None

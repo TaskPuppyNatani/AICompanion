@@ -3,6 +3,7 @@
     "category": "reasoning",
     "provider": "llama_cpp",
     "model": "models/reasoning/qwen-deep-think.gguf",
+    "prompt_format": "chat",
     "settings": {
         "context": 32768,
         "temperature": 0.6

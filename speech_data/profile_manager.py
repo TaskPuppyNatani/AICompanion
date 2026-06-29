@@ -17,6 +17,7 @@ DEFAULT_ACTIVE_PROFILE = "fast-chat"
 REQUIRED_PROFILE_FIELDS = ("name", "category", "provider", "model")
 OPTIONAL_PROFILE_FIELDS = ("mmproj",)
 OPTIONAL_POSITIVE_NUMBER_FIELDS = ("startup_timeout_seconds",)
+PROMPT_FORMATS = {"completion", "chat"}
 
 
 class ProfileManager:
@@ -49,6 +50,21 @@ class ProfileManager:
 
         settings = profile_data.get("settings", {})
         normalized["settings"] = deepcopy(settings) if isinstance(settings, dict) else {}
+
+        prompt_format = profile_data.get("prompt_format", "completion")
+        if isinstance(prompt_format, str):
+            prompt_format = prompt_format.strip().lower()
+
+        if prompt_format in PROMPT_FORMATS:
+            normalized["prompt_format"] = prompt_format
+        else:
+            if prompt_format is not None:
+                print(
+                    f"[MODEL] Profile '{profile_key}' field 'prompt_format' "
+                    "must be 'completion' or 'chat'; using 'completion'."
+                )
+
+            normalized["prompt_format"] = "completion"
 
         for field in OPTIONAL_PROFILE_FIELDS:
             value = profile_data.get(field)
@@ -171,6 +187,7 @@ class ProfileManager:
             "category": "chat",
             "provider": "llama_cpp",
             "model": "models/chat/gemma3.gguf",
+            "prompt_format": "chat",
             "settings": {},
         }
 

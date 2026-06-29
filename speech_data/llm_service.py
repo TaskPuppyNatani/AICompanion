@@ -43,12 +43,12 @@ class LLMService:
 
     def generate_provider_response(
         self,
-        prompt: str,
+        messages: list[dict[str, str]],
         generation_options: dict[str, Any] | None = None,
     ) -> str | None:
-        """Send a prompt to the active provider and return generated text."""
+        """Send provider-neutral messages to the active provider."""
         provider = get_active_provider()
-        return provider.generate_text(prompt, generation_options=generation_options)
+        return provider.generate_text(messages, generation_options=generation_options)
 
     def is_plain_click_response(self, text: str | None) -> bool:
         """Return whether text is acceptable for an AI click bubble."""
@@ -104,19 +104,11 @@ class LLMService:
             else:
                 latest_note_line = "Latest note: none"
 
-            prompt = (
+            system_message = (
                 "You are Rivet, a friendly and playful AI companion.\n"
                 "Use the personality profile below to stay in character.\n\n"
                 "Personality profile:\n"
                 f"{personality or 'No personality profile provided.'}\n\n"
-                "Current click context:\n"
-                f"Click count: {click_count}\n"
-                f"{latest_note_line}\n\n"
-                "Memory guidance:\n"
-                "- Memories are background context.\n"
-                "- Do not assume the user is currently thinking about a memory.\n"
-                "- Mention memories only when naturally relevant.\n"
-                "- Most responses should not mention memories.\n\n"
                 "Response rules:\n"
                 "- Return exactly one sentence.\n"
                 "- Keep it concise.\n"
@@ -127,9 +119,23 @@ class LLMService:
                 "- Do not wrap the response in quotes.\n"
                 "Return only one short spoken line from Rivet."
             )
+            user_message = (
+                "Current click context:\n"
+                f"Click count: {click_count}\n"
+                f"{latest_note_line}\n\n"
+                "Memory guidance:\n"
+                "- Memories are background context.\n"
+                "- Do not assume the user is currently thinking about a memory.\n"
+                "- Mention memories only when naturally relevant.\n"
+                "- Most responses should not mention memories."
+            )
+            messages = [
+                {"role": "system", "content": system_message},
+                {"role": "user", "content": user_message},
+            ]
 
             response = self.generate_provider_response(
-                prompt,
+                messages,
                 generation_options={"n_predict": 32},
             )
             if not self.is_plain_click_response(response):
@@ -154,17 +160,19 @@ class LLMService:
         if not prompt_text:
             return None
 
-        prompt = (
+        system_message = (
             "You are Rivet, a friendly and helpful AI companion.\n"
             "Use the personality profile below to stay in character.\n\n"
             "Personality profile:\n"
             f"{personality or 'No personality profile provided.'}\n\n"
-            "User prompt:\n"
-            f"{prompt_text}\n\n"
             "Respond directly and naturally as Rivet."
         )
+        messages = [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": prompt_text},
+        ]
 
-        response = self.generate_provider_response(prompt)
+        response = self.generate_provider_response(messages)
         if not response or not response.strip():
             return None
         return response.strip()

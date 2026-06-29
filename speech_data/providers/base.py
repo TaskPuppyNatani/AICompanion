@@ -100,8 +100,67 @@ class LLMProvider(ABC):
     @abstractmethod
     def generate_text(
         self,
-        prompt: str,
+        messages: list[dict[str, str]] | str,
         generation_options: dict[str, Any] | None = None,
     ) -> str | None:
         """Generate a non-streaming response for the prompt."""
         ...
+
+    def normalize_messages(
+        self,
+        messages: list[dict[str, str]] | str,
+    ) -> list[dict[str, str]]:
+        """Normalize provider-neutral messages into role/content dictionaries."""
+        if isinstance(messages, str):
+            content = messages.strip()
+            return [{"role": "user", "content": content}] if content else []
+
+        if not isinstance(messages, list):
+            return []
+
+        normalized_messages: list[dict[str, str]] = []
+
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+
+            role = message.get("role", "user")
+            content = message.get("content", "")
+
+            if not isinstance(role, str):
+                role = "user"
+
+            if not isinstance(content, str):
+                content = str(content or "")
+
+            role = role.strip().lower() or "user"
+            content = content.strip()
+
+            if content:
+                normalized_messages.append({
+                    "role": role,
+                    "content": content,
+                })
+
+        return normalized_messages
+
+    def render_messages_as_prompt(
+        self,
+        messages: list[dict[str, str]] | str,
+    ) -> str:
+        """Render provider-neutral messages into a raw completion prompt."""
+        normalized_messages = self.normalize_messages(messages)
+        prompt_parts = []
+
+        for message in normalized_messages:
+            role = message["role"]
+            content = message["content"]
+
+            if role == "system":
+                prompt_parts.append(content)
+            elif role == "assistant":
+                prompt_parts.append(f"Assistant:\n{content}")
+            else:
+                prompt_parts.append(f"User:\n{content}")
+
+        return "\n\n".join(prompt_parts).strip()

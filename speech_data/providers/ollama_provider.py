@@ -118,14 +118,16 @@ class OllamaProvider(LLMProvider):
 
     def generate_text(
         self,
-        prompt: str,
+        messages: list[dict[str, str]] | str,
         generation_options: dict[str, Any] | None = None,
     ) -> str | None:
         start_time = time.perf_counter()
         try:
             _ = generation_options
 
-            if not isinstance(prompt, str) or not prompt.strip():
+            prompt = self.render_messages_as_prompt(messages)
+
+            if not prompt:
                 return None
 
             model_name = self.profile.get("model", "")

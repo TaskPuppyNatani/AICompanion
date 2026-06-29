@@ -3,6 +3,7 @@
     "category": "chat",
     "provider": "llama_cpp",
     "model": "models/chat/gemma3.gguf",
+    "prompt_format": "chat",
     "settings": {
         "context": 32768,
         "temperature": 0.8
