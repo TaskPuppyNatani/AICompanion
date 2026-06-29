@@ -11,13 +11,16 @@ from config import (
 )
 
 
-def chat(event, sender=None):
+def chat(event, sender=None, interaction_data=None):
     payload = {
         "event": event
     }
 
     if sender:
         payload["sender"] = sender
+
+    if interaction_data:
+        payload.update(interaction_data)
 
     response = requests.post(
         f"{BASE_URL}/chat",

@@ -1368,8 +1368,7 @@ class CompanionApplication:
         register_notify_callback(bridge.notify_signal.emit)
 
     def _ensure_active_provider_ready(self):
-        provider = get_active_provider()
-        provider.ensure_running()
+        get_active_provider()
 
     def _ensure_speech_server_ready(self):
         global speech_server_process

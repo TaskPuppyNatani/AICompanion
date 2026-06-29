@@ -33,7 +33,10 @@ from speech_data.chat_data import (
     DISCORD_RESPONSES,
     DISCORD_SENDER_RESPONSES,
 )
+from speech_data.intent_router import IntentRouter
 from speech_data.llm_service import LLMService
+from speech_data.profile_manager import use_profile
+from speech_data.tools import ToolManager
 from companion_app.model_profiles import (
     get_active_profile_name,
     list_model_profiles,
@@ -266,6 +269,8 @@ def load_personality():
 
 PERSONALITY = load_personality()
 llm_service = LLMService()
+tool_manager = ToolManager()
+intent_router = IntentRouter()
 
 def load_memory():
     MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -401,6 +406,12 @@ def chat():
     else:
         summary = ""
 
+    user_prompt = data.get("prompt")
+    if isinstance(user_prompt, str):
+        user_prompt = user_prompt.strip()
+    else:
+        user_prompt = ""
+
     latest_note_text_cache = None
 
     def get_latest_note_text_for_context():
@@ -460,7 +471,28 @@ def chat():
         for message in DISCORD_SENDER_RESPONSES
     ]
 
-    if event == "startup":
+    if event == "prompt":
+
+        prompt_context = build_llm_context()
+        tool_response = tool_manager.handle(user_prompt, prompt_context)
+
+        if has_llm_text(tool_response):
+            response = tool_response.strip()
+        else:
+            routed_profile = intent_router.route(user_prompt, prompt_context)
+
+            with use_profile(routed_profile):
+                llm_prompt_response = llm_service.generate_prompt_response(
+                    user_prompt,
+                    prompt_context
+                )
+
+            if has_llm_text(llm_prompt_response):
+                response = llm_prompt_response.strip()
+            else:
+                response = "Ratchet seems to be thinking too hard right now."
+
+    elif event == "startup":
 
         response = random.choice(startup_responses)
 

@@ -126,6 +126,36 @@ class LLMService:
             return None
         return response.strip()
 
+    def generate_prompt_response(
+        self,
+        user_prompt: str,
+        context: dict[str, Any],
+    ) -> str | None:
+        """Generate a response to an explicit user prompt."""
+        try:
+            personality = str(context.get("personality", "") or "").strip()
+            prompt_text = str(user_prompt or "").strip()
+        except (AttributeError, TypeError, ValueError):
+            return None
+
+        if not prompt_text:
+            return None
+
+        prompt = (
+            "You are Rivet, a friendly and helpful AI companion.\n"
+            "Use the personality profile below to stay in character.\n\n"
+            "Personality profile:\n"
+            f"{personality or 'No personality profile provided.'}\n\n"
+            "User prompt:\n"
+            f"{prompt_text}\n\n"
+            "Respond directly and naturally as Rivet."
+        )
+
+        response = self.generate_provider_response(prompt)
+        if not response or not response.strip():
+            return None
+        return response.strip()
+
     def generate_memory_response(self, context: dict[str, Any]) -> str | None:
         """Future memory-aware response generation hook.
 

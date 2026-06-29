@@ -20,19 +20,25 @@ def get_active_provider_name() -> str:
     return _get_provider_name(get_active_profile())
 
 
-def get_active_provider() -> LLMProvider:
-    """Resolve the current active LLM provider instance."""
-    active_profile = get_active_profile()
-    provider_name = _get_provider_name(active_profile)
+def construct_provider(profile: dict) -> LLMProvider:
+    """Construct a provider instance for the profile."""
+    provider_name = _get_provider_name(profile)
 
     if provider_name == "ollama":
-        return OllamaProvider(profile=active_profile)
+        return OllamaProvider(profile=profile)
 
     if provider_name == "llama_cpp":
-        return LlamaCppProvider(profile=active_profile)
+        return LlamaCppProvider(profile=profile)
 
     print(
         "[MODEL] Unknown provider "
         f"'{provider_name}', falling back to provider='ollama'."
     )
-    return OllamaProvider(profile=active_profile)
+    return OllamaProvider(profile=profile)
+
+
+def get_active_provider() -> LLMProvider:
+    """Return the ready provider for the current active profile."""
+    from speech_data.provider_lifecycle import get_provider_for_active_profile
+
+    return get_provider_for_active_profile()

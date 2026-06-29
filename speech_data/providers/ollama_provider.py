@@ -66,8 +66,21 @@ class OllamaProvider(LLMProvider):
         self.started_by_companion = True
 
     def stop(self) -> None:
-        """Ollama shutdown is intentionally not managed yet."""
-        return
+        if not self.started_by_companion or self.process is None:
+            return
+
+        try:
+            if self.process.poll() is None:
+                self.process.terminate()
+
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+                    self.process.wait(timeout=2)
+        finally:
+            self.process = None
+            self.started_by_companion = False
 
     def generate_text(self, prompt: str) -> str | None:
         if not isinstance(prompt, str) or not prompt.strip():

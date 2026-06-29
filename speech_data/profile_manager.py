@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
+from contextvars import ContextVar
 from copy import deepcopy
 from pathlib import Path
+from collections.abc import Iterator
 from typing import Any
 
 from config import BASE_DIR, SPEECH_DATA_DIR
@@ -19,6 +22,10 @@ class ProfileManager:
 
     def __init__(self, profiles_dir: Path = PROFILES_DIR):
         self.profiles_dir = profiles_dir
+        self._active_profile_override: ContextVar[str | None] = ContextVar(
+            "active_profile_override",
+            default=None,
+        )
 
     def _normalize_profile(
         self,
@@ -74,6 +81,10 @@ class ProfileManager:
         return self.load_profiles()
 
     def get_active_profile_name(self) -> str:
+        override_key = self._active_profile_override.get()
+        if override_key is not None:
+            return self._resolve_profile_name(override_key)
+
         configured_key = get_config_value(
             "active_model_profile",
             DEFAULT_ACTIVE_PROFILE,
@@ -83,16 +94,19 @@ class ProfileManager:
             configured_key = DEFAULT_ACTIVE_PROFILE
 
         configured_key = configured_key.strip()
+        return self._resolve_profile_name(configured_key)
+
+    def _resolve_profile_name(self, profile_key: str) -> str:
         profiles = self.load_profiles()
 
-        if configured_key in profiles:
-            return configured_key
+        if profile_key in profiles:
+            return profile_key
 
         if DEFAULT_ACTIVE_PROFILE in profiles:
-            if configured_key != DEFAULT_ACTIVE_PROFILE:
+            if profile_key != DEFAULT_ACTIVE_PROFILE:
                 print(
                     "[MODEL] Active profile "
-                    f"'{configured_key}' is not configured; "
+                    f"'{profile_key}' is not configured; "
                     f"falling back to profile '{DEFAULT_ACTIVE_PROFILE}'."
                 )
 
@@ -140,6 +154,19 @@ class ProfileManager:
         set_config_value("active_model_profile", profile_key)
         return True
 
+    @contextmanager
+    def use_profile(self, profile_key: str | None) -> Iterator[None]:
+        if not isinstance(profile_key, str) or not profile_key.strip():
+            yield
+            return
+
+        token = self._active_profile_override.set(profile_key.strip())
+
+        try:
+            yield
+        finally:
+            self._active_profile_override.reset(token)
+
     def resolve_model_path(self, profile: dict[str, Any]) -> Path:
         model = profile.get("model")
 
@@ -171,6 +198,10 @@ def get_active_profile() -> dict[str, Any]:
 
 def set_active_profile(profile_key: str) -> bool:
     return profile_manager.set_active_profile(profile_key)
+
+
+def use_profile(profile_key: str | None) -> Iterator[None]:
+    return profile_manager.use_profile(profile_key)
 
 
 def resolve_model_path(profile: dict[str, Any]) -> Path:
