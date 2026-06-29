@@ -15,7 +15,7 @@ DEFAULT_CONFIG = {
     "notification_duration": 5000,
     "voice_enabled": True,
     "avatar_position": None,
-    "active_model_profile": "fast",
+    "active_model_profile": "fast-chat",
     "model_profiles": {
         "fast": {
             "display_name": "Fast",
@@ -60,8 +60,8 @@ if (
 ):
     config["avatar_size"] = DEFAULT_CONFIG["avatar_size"]
 
-if not isinstance(config.get("active_model_profile", "fast"), str):
-    config["active_model_profile"] = "fast"
+if not isinstance(config.get("active_model_profile", "fast-chat"), str):
+    config["active_model_profile"] = "fast-chat"
 
 if not isinstance(config.get("model_profiles"), dict):
     config["model_profiles"] = deepcopy(DEFAULT_CONFIG["model_profiles"])

@@ -5,15 +5,17 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
 
-from companion_app.model_profiles import get_active_model_name
 from config import (
+    OLLAMA_MODEL_NAME,
     OLLAMA_GENERATE_URL,
     OLLAMA_HEALTH_URL,
     OLLAMA_REQUEST_TIMEOUT_SEC,
 )
+from speech_data.profile_manager import get_active_profile
 from speech_data.providers.base import LLMProvider
 
 
@@ -23,8 +25,9 @@ OLLAMA_FALLBACK_EXE = Path(os.environ.get("LOCALAPPDATA", "")) / "Programs" / "O
 class OllamaProvider(LLMProvider):
     """Provider for an Ollama generate API backend."""
 
-    def __init__(self):
+    def __init__(self, profile: dict[str, Any] | None = None):
         super().__init__()
+        self.profile = profile or get_active_profile()
         self.process = None
 
     def health_check(self) -> bool:
@@ -70,10 +73,13 @@ class OllamaProvider(LLMProvider):
         if not isinstance(prompt, str) or not prompt.strip():
             return None
 
-        model_name = get_active_model_name()
+        model_name = self.profile.get("model", "")
+
+        if not isinstance(model_name, str) or not model_name.strip():
+            model_name = OLLAMA_MODEL_NAME
 
         payload = {
-            "model": model_name,
+            "model": model_name.strip(),
             "prompt": prompt,
             "stream": False,
         }

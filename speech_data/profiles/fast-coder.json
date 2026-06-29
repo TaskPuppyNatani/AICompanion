@@ -1,0 +1,10 @@
+{
+    "name": "Fast Coder",
+    "category": "coding",
+    "provider": "llama_cpp",
+    "model": "models/coding/qwen-fast-coder.gguf",
+    "settings": {
+        "context": 32768,
+        "temperature": 0.4
+    }
+}

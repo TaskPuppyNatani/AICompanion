@@ -1,0 +1,10 @@
+{
+    "name": "Fast Chat",
+    "category": "chat",
+    "provider": "llama_cpp",
+    "model": "models/chat/gemma3.gguf",
+    "settings": {
+        "context": 32768,
+        "temperature": 0.8
+    }
+}
