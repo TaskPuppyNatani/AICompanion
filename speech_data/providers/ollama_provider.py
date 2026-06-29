@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from config import (
@@ -29,13 +30,45 @@ class OllamaProvider(LLMProvider):
     def __init__(self, profile: dict[str, Any] | None = None):
         super().__init__()
         self.profile = profile or get_active_profile()
+        self.apply_profile_lifecycle_settings(self.profile)
         self.process = None
 
     def health_check(self) -> bool:
         try:
             with urlopen(OLLAMA_HEALTH_URL, timeout=1.0) as response:
-                return getattr(response, "status", 200) == 200
-        except (OSError, URLError):
+                status = getattr(response, "status", 200)
+                if status == 200:
+                    self.last_readiness_state = "HTTP 200 OK"
+                    return True
+
+                self.last_readiness_state = f"HTTP {status}"
+                return False
+        except HTTPError as e:
+            preview = e.read(300).decode("utf-8", errors="replace").strip()
+            self.last_readiness_state = f"HTTP {e.code}: {preview}"
+            return False
+        except TimeoutError:
+            self.last_readiness_state = "health probe timed out"
+            return False
+        except (ConnectionRefusedError, ConnectionResetError):
+            self.last_readiness_state = "connection refused"
+            return False
+        except URLError as e:
+            reason = getattr(e, "reason", e)
+            if isinstance(reason, TimeoutError):
+                self.last_readiness_state = "health probe timed out"
+            elif isinstance(reason, (ConnectionRefusedError, ConnectionResetError)):
+                self.last_readiness_state = "connection refused"
+            else:
+                self.last_readiness_state = (
+                    f"URL error: {type(reason).__name__}: {reason}"
+                )
+            return False
+        except socket.timeout:
+            self.last_readiness_state = "health probe timed out"
+            return False
+        except OSError as e:
+            self.last_readiness_state = f"OS error: {type(e).__name__}: {e}"
             return False
 
     def _find_ollama_exe(self):

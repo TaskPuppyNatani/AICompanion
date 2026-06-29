@@ -1,4 +1,5 @@
 from flask import Flask, request, send_file, jsonify
+import atexit
 import numpy as np
 import re
 import soundfile as sf
@@ -38,6 +39,10 @@ from speech_data.chat_data import (
 from speech_data.intent_router import IntentRouter
 from speech_data.llm_service import LLMService
 from speech_data.profile_manager import use_profile
+from speech_data.provider_lifecycle import (
+    get_provider_for_active_profile,
+    stop_active_provider,
+)
 from speech_data.tools import ToolManager
 from companion_app.model_profiles import (
     get_active_profile_name,
@@ -273,6 +278,14 @@ PERSONALITY = load_personality()
 llm_service = LLMService()
 tool_manager = ToolManager()
 intent_router = IntentRouter()
+
+
+def initialize_active_provider():
+    get_provider_for_active_profile()
+
+
+def shutdown_active_provider():
+    stop_active_provider()
 
 def load_memory():
     MEMORY_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -905,6 +918,8 @@ def reload_personality():
     })
 
 if __name__ == "__main__":
+    atexit.register(shutdown_active_provider)
+    initialize_active_provider()
     app.run(
         host=SPEECH_SERVER_HOST,
         port=SPEECH_SERVER_PORT,

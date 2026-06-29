@@ -65,7 +65,6 @@ from config_store import (
 )
 from companion_app import api_client, note_workflow
 from companion_app import voice_capture
-from speech_data.provider_factory import get_active_provider
 
 app = None
 label = None
@@ -1448,7 +1447,6 @@ class CompanionApplication:
         app = QApplication(sys.argv)
         self.app = app
 
-        self._ensure_active_provider_ready()
         self._ensure_speech_server_ready()
 
         self._wire_notification_callbacks()
@@ -1463,9 +1461,6 @@ class CompanionApplication:
     def _wire_notification_callbacks(self):
         bridge.notify_signal.connect(notify)
         register_notify_callback(bridge.notify_signal.emit)
-
-    def _ensure_active_provider_ready(self):
-        get_active_provider()
 
     def _ensure_speech_server_ready(self):
         global speech_server_process

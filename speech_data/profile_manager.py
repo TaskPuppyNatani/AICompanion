@@ -16,6 +16,7 @@ PROFILES_DIR = SPEECH_DATA_DIR / "profiles"
 DEFAULT_ACTIVE_PROFILE = "fast-chat"
 REQUIRED_PROFILE_FIELDS = ("name", "category", "provider", "model")
 OPTIONAL_PROFILE_FIELDS = ("mmproj",)
+OPTIONAL_POSITIVE_NUMBER_FIELDS = ("startup_timeout_seconds",)
 
 
 class ProfileManager:
@@ -54,6 +55,30 @@ class ProfileManager:
 
             if isinstance(value, str) and value.strip():
                 normalized[field] = value.strip()
+
+        for field in OPTIONAL_POSITIVE_NUMBER_FIELDS:
+            value = profile_data.get(field)
+
+            if isinstance(value, bool):
+                print(
+                    f"[MODEL] Profile '{profile_key}' field '{field}' "
+                    "must be a positive number."
+                )
+                continue
+
+            if isinstance(value, (int, float)):
+                if value > 0:
+                    normalized[field] = float(value)
+                else:
+                    print(
+                        f"[MODEL] Profile '{profile_key}' field '{field}' "
+                        "must be a positive number."
+                    )
+            elif value is not None:
+                print(
+                    f"[MODEL] Profile '{profile_key}' field '{field}' "
+                    "must be a positive number."
+                )
 
         normalized["display_name"] = normalized["name"]
         return normalized

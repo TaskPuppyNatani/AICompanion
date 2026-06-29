@@ -47,6 +47,12 @@ class ProviderLifecycle:
 
         provider.stop()
 
+    def stop_active_provider(self) -> None:
+        with self._lock:
+            self._stop_provider(self._provider)
+            self._provider = None
+            self._identity = None
+
     def get_provider_for_active_profile(self) -> LLMProvider:
         start_time = time.perf_counter()
         active_profile = get_active_profile()
@@ -148,3 +154,7 @@ provider_lifecycle = ProviderLifecycle()
 
 def get_provider_for_active_profile() -> LLMProvider:
     return provider_lifecycle.get_provider_for_active_profile()
+
+
+def stop_active_provider() -> None:
+    provider_lifecycle.stop_active_provider()
