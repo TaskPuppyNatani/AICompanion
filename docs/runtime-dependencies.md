@@ -1,6 +1,6 @@
 # Rivet Runtime Dependencies
 
-This file tracks the **runtime dependencies required for Rivet to function**, with emphasis on the current Windows development setup and future portability work.
+This file tracks the runtime dependencies required for Rivet to function, with emphasis on the current Windows development setup and portable llama.cpp runtime.
 
 ---
 
@@ -8,20 +8,16 @@ This file tracks the **runtime dependencies required for Rivet to function**, wi
 
 ## Python
 
-* **Python 3.12.x**
-* Rivet is currently being run from a local `.venv`
+* Python 3.12.x
+* Rivet is currently run from a local `.venv`
 
 ## Current LLM Backend
 
-* Provider-based LLM backend
-* Current active provider in development:
+Rivet is a llama.cpp-only application at runtime.
 
-  * `llama_cpp`
-  * `models/gemma3.gguf`
-
-* Supported fallback provider:
-
-  * **Ollama 0.30.x**
+* `llama-server`
+* Disk-backed model profiles in `speech_data/profiles/`
+* Provider lifecycle management owned by the speech server
 
 ## Current Runtime Entry Points
 
@@ -32,7 +28,7 @@ This file tracks the **runtime dependencies required for Rivet to function**, wi
 
 # 2. Required Python Runtime Packages
 
-These packages are required for Rivet’s currently working feature set.
+These packages are required for Rivet's currently working feature set.
 
 ## UI / app runtime
 
@@ -42,6 +38,7 @@ These packages are required for Rivet’s currently working feature set.
 
 ## LLM / AI runtime
 
+* local `llama-server`
 * `faster-whisper==1.2.1`
 * `kokoro==0.9.4`
 * `numpy`
@@ -56,35 +53,35 @@ These packages are required for Rivet’s currently working feature set.
 
 # 3. Feature-to-Dependency Mapping
 
-## A. Core Rivet app / UI
+## Core Rivet app / UI
 
 Used for the desktop companion, local HTTP calls, and app behavior.
 
 * `PyQt6`
 * `requests`
 
-## B. Speech server / local API
+## Speech server / local API
 
-Used by Rivet’s local speech and chat service flow.
+Used by Rivet's local speech and chat service flow.
 
 * `Flask`
 * `requests`
 
-## C. LLM generation
+## LLM generation
 
-LLM generation is routed through the provider abstraction.
+LLM generation is routed through the provider abstraction to llama.cpp.
 
-* **llama.cpp** via local `llama-server`
-* **Ollama 0.30.x**
-* active provider selected in `speech_data/provider_factory.py`
+* local `llama-server`
+* GGUF model files referenced by disk-backed profiles
+* optional `mmproj` files for vision profiles
 
-## D. TTS
+## TTS
 
-Used for Rivet’s speech generation.
+Used for Rivet's speech generation.
 
 * `kokoro==0.9.4`
 
-## E. Voice transcription / voice notes
+## Voice transcription / voice notes
 
 Used for speech-to-text and microphone voice note handling.
 
@@ -103,8 +100,16 @@ Requires:
 
 * Rivet Python environment
 * Flask speech server path working
-* active LLM provider reachable
-* active provider model available
+* llama.cpp provider reachable
+* active profile model available
+
+## Prompt Mode and Vision prompts
+
+Requires:
+
+* active llama.cpp profile
+* model files referenced by the selected profile
+* vision model plus `mmproj` file for image prompts
 
 ## Speech / spoken output
 
@@ -132,52 +137,49 @@ If `sounddevice` is missing, voice note capture will fail with the runtime messa
 
 This reflects the currently known working stack in the project as of the latest Rivet work:
 
-* **Ollama**: `0.30.x`
-* **llama.cpp**: local `llama-server`
-* **faster-whisper**: `1.2.1`
-* **kokoro**: `0.9.4`
-* **default llama.cpp model**: `models/gemma3.gguf`
+* llama.cpp: local `llama-server`
+* faster-whisper: `1.2.1`
+* kokoro: `0.9.4`
+* model profiles:
+  * Fast Chat
+  * Fast Coder
+  * Deep Think
+  * Vision
 
 Additional confirmed runtime package requirement for voice notes:
 
-* **sounddevice**
+* `sounddevice`
 
 ---
 
 # 6. Current Architecture Notes
 
-## Current state
-
 Rivet currently uses:
 
 * Rivet UI / companion app
 * local speech server
-* provider-backed text generation
-* model profile system for selecting the active model
+* provider-backed generation through llama.cpp
+* model profile system for selecting provider startup inputs
+* provider-neutral message architecture
 * lazy TTS initialization through the speech server
 
-## Provider architecture
-
-Rivet now uses an **LLM provider abstraction layer**. The current portable path uses **llama.cpp**, while **Ollama** remains a supported provider.
+The provider abstraction remains in place for future extensibility, but llama.cpp is the only supported runtime provider.
 
 ---
 
 # 7. Portability Notes
 
-## Current portability goal
-
 Rivet is being prepared for:
 
 * running from a moved project folder / external drive
-* eventual flash-drive portability
-* eventual self-contained launcher flow
-
-## Important implication
+* flash-drive portability
+* self-contained launcher flow
 
 This dependency file should be updated whenever:
 
 * a new runtime package is required for an existing feature
-* the active LLM backend changes
+* the llama.cpp runtime strategy changes
+* the default model/profile set changes
 * the launcher/runtime packaging strategy changes
 * a feature depends on a package that is not installed by default in the base `.venv`
 
@@ -187,11 +189,9 @@ This dependency file should be updated whenever:
 
 When Rivet changes, update this file if any of the following happen:
 
-* Ollama version changes
 * llama.cpp version changes
-* default model changes
+* model profile requirements change
 * Kokoro version changes
 * faster-whisper version changes
 * a new voice/audio dependency is added
-* the active provider changes
 * runtime packaging changes for portable/self-contained deployment

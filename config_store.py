@@ -1,10 +1,9 @@
 import json
-from copy import deepcopy
 from pathlib import Path
-from config import ( OLLAMA_MODEL_NAME,
-                     AVATAR_IMAGE_PATH,
-                     CONFIG_DIR,
-                    )
+from config import (
+    AVATAR_IMAGE_PATH,
+    CONFIG_DIR,
+)
 
 CONFIG_PATH = CONFIG_DIR / "config.json"
 LEGACY_CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -17,20 +16,6 @@ DEFAULT_CONFIG = {
     "preferred_name": None,
     "avatar_position": None,
     "active_model_profile": "fast-chat",
-    "model_profiles": {
-        "fast": {
-            "display_name": "Fast",
-            "model_name": OLLAMA_MODEL_NAME,
-        },
-        "balanced": {
-            "display_name": "Balanced",
-            "model_name": "maxwellb/gemma4-12b-it-oym:latest",
-        },
-        "smart": {
-            "display_name": "Smart",
-            "model_name": "gemma4:26b",
-        },
-    },
 }
 
 CONFIG_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,9 +54,6 @@ if (
 
 if not isinstance(config.get("active_model_profile", "fast-chat"), str):
     config["active_model_profile"] = "fast-chat"
-
-if not isinstance(config.get("model_profiles"), dict):
-    config["model_profiles"] = deepcopy(DEFAULT_CONFIG["model_profiles"])
 
 
 def _write_config():

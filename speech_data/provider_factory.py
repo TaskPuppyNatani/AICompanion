@@ -3,7 +3,6 @@ from __future__ import annotations
 from speech_data.profile_manager import get_active_profile
 from speech_data.providers.base import LLMProvider
 from speech_data.providers.llama_cpp_provider import LlamaCppProvider
-from speech_data.providers.ollama_provider import OllamaProvider
 
 
 def _get_provider_name(profile: dict) -> str:
@@ -24,17 +23,13 @@ def construct_provider(profile: dict) -> LLMProvider:
     """Construct a provider instance for the profile."""
     provider_name = _get_provider_name(profile)
 
-    if provider_name == "ollama":
-        return OllamaProvider(profile=profile)
-
     if provider_name == "llama_cpp":
         return LlamaCppProvider(profile=profile)
 
-    print(
-        "[MODEL] Unknown provider "
-        f"'{provider_name}', falling back to provider='ollama'."
+    raise RuntimeError(
+        "[MODEL] Unsupported provider "
+        f"'{provider_name}'. Rivet currently supports only 'llama_cpp'."
     )
-    return OllamaProvider(profile=profile)
 
 
 def get_active_provider() -> LLMProvider:
