@@ -46,6 +46,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QTextEdit,
     QFileDialog,
+    QScrollArea,
 )
 from PyQt6.QtCore import (
     Qt,
@@ -264,6 +265,7 @@ class PromptWindow(QWidget):
         self.attachment = None
         self._base_style = self.styleSheet()
         self._geometry_ready = False
+        self.transcript_entries = []
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -334,13 +336,24 @@ class PromptWindow(QWidget):
         close_button.clicked.connect(self.hide)
         action_layout.addWidget(close_button)
 
+        clear_button = QPushButton("Clear Workspace", self)
+        clear_button.clicked.connect(self.clear_workspace)
+        action_layout.addWidget(clear_button)
+
         layout.addLayout(action_layout)
 
-        self.response_text = QTextEdit(self)
-        self.response_text.setReadOnly(True)
-        self.response_text.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
-        self.response_text.setMinimumHeight(260)
-        layout.addWidget(self.response_text, 1)
+        self.transcript_area = QScrollArea(self)
+        self.transcript_area.setWidgetResizable(True)
+        self.transcript_area.setMinimumHeight(260)
+
+        self.transcript_widget = QWidget(self.transcript_area)
+        self.transcript_layout = QVBoxLayout(self.transcript_widget)
+        self.transcript_layout.setSpacing(14)
+        self.transcript_layout.setContentsMargins(8, 8, 8, 8)
+        self.transcript_layout.addStretch()
+
+        self.transcript_area.setWidget(self.transcript_widget)
+        layout.addWidget(self.transcript_area, 1)
 
         self.escape_shortcut = QShortcut(QKeySequence("Escape"), self)
         self.escape_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
@@ -418,6 +431,7 @@ class PromptWindow(QWidget):
 
     def closeEvent(self, event):
         self.save_geometry()
+        self.clear_workspace()
         event.ignore()
         self.hide()
 
@@ -660,6 +674,92 @@ class PromptWindow(QWidget):
 
         return [self.attachment]
 
+    def clear_transcript_widgets(self):
+        while self.transcript_layout.count() > 1:
+            item = self.transcript_layout.takeAt(0)
+            widget = item.widget()
+
+            if widget is not None:
+                widget.deleteLater()
+
+    def clear_workspace(self):
+        self.transcript_entries.clear()
+        self.clear_transcript_widgets()
+        self.focus_prompt_editor()
+
+    def add_text_block(self, parent_layout, speaker, text):
+        speaker_label = QLabel(speaker, self.transcript_widget)
+        speaker_label.setTextFormat(Qt.TextFormat.PlainText)
+        parent_layout.addWidget(speaker_label)
+
+        content = QTextEdit(self.transcript_widget)
+        content.setReadOnly(True)
+        content.setPlainText("" if text is None else str(text))
+        content.setLineWrapMode(QTextEdit.LineWrapMode.WidgetWidth)
+        content.setMinimumHeight(80)
+        parent_layout.addWidget(content)
+
+    def add_attachment_block(self, parent_layout, attachments):
+        for attachment in attachments or []:
+            if not isinstance(attachment, dict):
+                continue
+
+            pixmap = attachment.get("pixmap")
+            payload = attachment.get("payload", {})
+            filename = payload.get("name", "image") if isinstance(payload, dict) else "image"
+
+            if not isinstance(pixmap, QPixmap) or pixmap.isNull():
+                continue
+
+            attachment_layout = QVBoxLayout()
+
+            thumbnail = QLabel(self.transcript_widget)
+            thumbnail.setFixedSize(160, 160)
+            thumbnail.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            thumbnail.setPixmap(
+                pixmap.scaled(
+                    thumbnail.size(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
+            )
+            attachment_layout.addWidget(thumbnail)
+
+            filename_label = QLabel(
+                filename if isinstance(filename, str) else "image",
+                self.transcript_widget,
+            )
+            filename_label.setTextFormat(Qt.TextFormat.PlainText)
+            filename_label.setWordWrap(True)
+            attachment_layout.addWidget(filename_label)
+
+            parent_layout.addLayout(attachment_layout)
+
+    def append_transcript_entry(self, prompt, response, attachments=None):
+        entry = {
+            "prompt": "" if prompt is None else str(prompt),
+            "response": "" if response is None else str(response),
+            "attachments": list(attachments or []),
+        }
+        self.transcript_entries.append(entry)
+
+        entry_widget = QWidget(self.transcript_widget)
+        entry_layout = QVBoxLayout(entry_widget)
+        entry_layout.setSpacing(8)
+        entry_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.add_text_block(entry_layout, "You", entry["prompt"])
+        self.add_attachment_block(entry_layout, entry["attachments"])
+        self.add_text_block(entry_layout, "Rivet", entry["response"])
+
+        insert_at = max(0, self.transcript_layout.count() - 1)
+        self.transcript_layout.insertWidget(insert_at, entry_widget)
+        QTimer.singleShot(0, self.scroll_transcript_to_bottom)
+
+    def scroll_transcript_to_bottom(self):
+        scrollbar = self.transcript_area.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+
     def submit_prompt(self):
         prompt = self.prompt_text()
 
@@ -679,8 +779,8 @@ class PromptWindow(QWidget):
         self.focus_prompt_editor()
 
     def show_response(self, prompt, response, profile_name=None, attachments=None):
-        _ = (prompt, profile_name, attachments)
-        self.response_text.setPlainText("" if response is None else str(response))
+        _ = profile_name
+        self.append_transcript_entry(prompt, response, attachments)
         self.show_workspace()
 
 notifications = [
