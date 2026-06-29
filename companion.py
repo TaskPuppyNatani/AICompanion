@@ -91,7 +91,9 @@ speech_server_process = None
 speech_server_owned_by_companion = False
 
 SPEECH_HEALTHCHECK_URL = f"http://{API_HOST}:{API_PORT}/notes/recent"
-SPEECH_STARTUP_TIMEOUT_SEC = 45
+# Must exceed the largest profile startup_timeout_seconds so provider-owned
+# startup can finish before the desktop gives up on the speech server.
+SPEECH_STARTUP_TIMEOUT_SEC = 75
 SPEECH_POLL_INTERVAL_SEC = 0.5
 
 PROMPT_IMAGE_MAX_BYTES = 8 * 1024 * 1024
