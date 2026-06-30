@@ -273,6 +273,7 @@ class PromptWindow(QWidget):
         self.transcript_entries = []
         self.conversation_history = []
         self.dictation_state = "idle"
+        self.dictation_elapsed_seconds = 0
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -332,6 +333,11 @@ class PromptWindow(QWidget):
         self.microphone_button.clicked.connect(self.toggle_dictation)
         action_layout.addWidget(self.microphone_button)
 
+        self.dictation_status_label = QLabel(self)
+        self.dictation_status_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.dictation_status_label.hide()
+        action_layout.addWidget(self.dictation_status_label)
+
         action_layout.addStretch()
 
         submit_button = QPushButton("Submit", self)
@@ -383,6 +389,10 @@ class PromptWindow(QWidget):
         self._geometry_save_timer = QTimer(self)
         self._geometry_save_timer.setSingleShot(True)
         self._geometry_save_timer.timeout.connect(self.save_geometry)
+
+        self.dictation_timer = QTimer(self)
+        self.dictation_timer.setInterval(1000)
+        self.dictation_timer.timeout.connect(self.advance_dictation_timer)
 
         self.restore_geometry()
         self._geometry_ready = True
@@ -456,22 +466,51 @@ class PromptWindow(QWidget):
     def focus_prompt_editor(self):
         self.prompt_editor.setFocus(Qt.FocusReason.ShortcutFocusReason)
 
+    def format_dictation_elapsed(self):
+        minutes, seconds = divmod(self.dictation_elapsed_seconds, 60)
+        return f"{minutes:02d}:{seconds:02d}"
+
+    def show_dictation_status(self, message):
+        if not isinstance(message, str) or not message.strip():
+            self.dictation_status_label.clear()
+            self.dictation_status_label.hide()
+            return
+
+        self.dictation_status_label.setText(message.strip())
+        self.dictation_status_label.show()
+
+    def update_recording_status(self):
+        self.show_dictation_status(
+            f"● Recording... {self.format_dictation_elapsed()}"
+        )
+
+    def advance_dictation_timer(self):
+        self.dictation_elapsed_seconds += 1
+        self.update_recording_status()
+
     def set_dictation_state(self, state):
+        self.dictation_timer.stop()
         self.dictation_state = state
 
         if state == "recording":
+            self.dictation_elapsed_seconds = 0
             self.microphone_button.setText("Stop")
             self.microphone_button.setToolTip("Stop dictation and transcribe.")
             self.microphone_button.setEnabled(True)
+            self.update_recording_status()
+            self.dictation_timer.start()
         elif state == "transcribing":
             self.microphone_button.setText("Transcribing...")
             self.microphone_button.setToolTip("Transcribing dictation.")
             self.microphone_button.setEnabled(False)
+            self.show_dictation_status("Transcribing...")
         else:
             self.dictation_state = "idle"
+            self.dictation_elapsed_seconds = 0
             self.microphone_button.setText("Mic")
             self.microphone_button.setToolTip("Start dictation.")
             self.microphone_button.setEnabled(True)
+            self.show_dictation_status("")
 
     def toggle_dictation(self):
         if self.dictation_state == "recording":
@@ -1878,18 +1917,18 @@ class Companion(QLabel):
 
             voice_capture.cleanup_temp_audio_file(temp_audio_path)
 
-    def show_prompt_dictation_error(self, message):
-        QMessageBox.warning(self.prompt_window, "Dictation unavailable", message)
+    def show_prompt_dictation_status(self, message):
+        self.prompt_window.show_dictation_status(message)
 
     def start_prompt_dictation(self):
         if self.prompt_window.dictation_state != "idle":
             return
 
         if not voice_capture.audio_dependencies_available():
-            self.show_prompt_dictation_error(
-                "Dictation requires sounddevice, soundfile, and numpy."
-            )
             self.prompt_window.set_dictation_state("idle")
+            self.show_prompt_dictation_status(
+                "Microphone unavailable."
+            )
             return
 
         self.prompt_dictation_frames = []
@@ -1906,7 +1945,7 @@ class Companion(QLabel):
             self.prompt_dictation_stream = None
             self.prompt_dictation_frames = []
             self.prompt_window.set_dictation_state("idle")
-            self.show_prompt_dictation_error("Could not start dictation recording.")
+            self.show_prompt_dictation_status("Microphone unavailable.")
             return
 
         self.prompt_window.set_dictation_state("recording")
@@ -1924,7 +1963,7 @@ class Companion(QLabel):
 
         if not audio_frames:
             self.prompt_window.set_dictation_state("idle")
-            self.show_prompt_dictation_error("No audio captured.")
+            self.show_prompt_dictation_status("No speech detected.")
             return
 
         self.prompt_window.set_dictation_state("transcribing")
@@ -1937,13 +1976,14 @@ class Companion(QLabel):
             )
         except Exception as e:
             print(f"Prompt dictation transcription error: {e}")
-            self.show_prompt_dictation_error("Could not transcribe dictation right now.")
-            return
-        finally:
             self.prompt_window.set_dictation_state("idle")
+            self.show_prompt_dictation_status("Transcription failed.")
+            return
+
+        self.prompt_window.set_dictation_state("idle")
 
         if not transcript_text:
-            self.show_prompt_dictation_error("No speech detected.")
+            self.show_prompt_dictation_status("No speech detected.")
             return
 
         self.prompt_window.insert_transcribed_text(transcript_text)
