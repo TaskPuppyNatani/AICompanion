@@ -12,6 +12,13 @@ Future
 
 ☐ Drag-and-drop model import
 
+
+Purpose:
+Start llama-server manually to simulate an externally managed provider.
+Used to verify Rivet's ownership policy. When this server is already
+running, Rivet should detect the conflict, refuse to adopt the process,
+and display the managed ownership error.
+
 D:\AICompanion\llama\llama-server.exe ^
   -m "D:\AICompanion\models\vision\qwen-vision.gguf" ^
   --mmproj "D:\AICompanion\models\vision\qwen-vision-mmproj.gguf" ^
