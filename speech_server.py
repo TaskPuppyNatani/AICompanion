@@ -208,6 +208,36 @@ def validate_prompt_attachments(raw_attachments):
     return validated_attachments, None
 
 
+def validate_conversation_history(raw_history):
+    if raw_history in (None, ""):
+        return []
+
+    if not isinstance(raw_history, list):
+        return []
+
+    validated_history = []
+
+    for raw_message in raw_history:
+        if not isinstance(raw_message, dict):
+            continue
+
+        role = raw_message.get("role")
+        content = raw_message.get("content")
+
+        if role not in {"user", "assistant"}:
+            continue
+
+        if not isinstance(content, str) or not content.strip():
+            continue
+
+        validated_history.append({
+            "role": role,
+            "content": content.strip(),
+        })
+
+    return validated_history
+
+
 def load_notes():
 
     if NOTES_FILE.exists():
@@ -533,6 +563,9 @@ def chat():
         prompt_attachments, attachment_error = validate_prompt_attachments(
             data.get("attachments")
         )
+        conversation_history = validate_conversation_history(
+            data.get("conversation_history")
+        )
 
         latest_note_text_cache = None
 
@@ -621,6 +654,7 @@ def chat():
                         user_prompt,
                         prompt_context,
                         attachments=prompt_attachments,
+                        conversation_history=conversation_history,
                     )
 
                     if has_llm_text(llm_prompt_response):
@@ -638,7 +672,8 @@ def chat():
                     with use_profile(routed_profile):
                         llm_prompt_response = llm_service.generate_prompt_response(
                             user_prompt,
-                            prompt_context
+                            prompt_context,
+                            conversation_history=conversation_history,
                         )
 
                     if has_llm_text(llm_prompt_response):

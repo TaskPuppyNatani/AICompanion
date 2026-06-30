@@ -182,6 +182,7 @@ class LLMService:
         user_prompt: str,
         context: dict[str, Any],
         attachments: list[dict[str, Any]] | None = None,
+        conversation_history: list[dict[str, Any]] | None = None,
     ) -> str | None:
         """Generate a response to an explicit user prompt."""
         try:
@@ -200,16 +201,35 @@ class LLMService:
             f"{personality or 'No personality profile provided.'}\n\n"
             "Respond directly and naturally as Rivet."
         )
-        messages = [
+        messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_message},
-            {
-                "role": "user",
-                "content": self.build_prompt_user_content(
-                    prompt_text,
-                    attachments=attachments,
-                ),
-            },
         ]
+
+        for message in conversation_history or []:
+            if not isinstance(message, dict):
+                continue
+
+            role = message.get("role")
+            content = message.get("content")
+
+            if role not in {"user", "assistant"}:
+                continue
+
+            if not isinstance(content, str) or not content.strip():
+                continue
+
+            messages.append({
+                "role": role,
+                "content": content.strip(),
+            })
+
+        messages.append({
+            "role": "user",
+            "content": self.build_prompt_user_content(
+                prompt_text,
+                attachments=attachments,
+            ),
+        })
 
         response = self.generate_provider_response(messages)
         if not response or not response.strip():

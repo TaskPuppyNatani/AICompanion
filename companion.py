@@ -107,6 +107,7 @@ PROMPT_IMAGE_FORMAT_MIME_TYPES = {
     "webp": "image/webp",
 }
 PROMPT_IMAGE_FILE_FILTER = "Images (*.png *.jpg *.jpeg *.webp)"
+PROMPT_CONVERSATION_EXCHANGE_LIMIT = 10
 
 
 def _format_qbytearray(value):
@@ -267,6 +268,7 @@ class PromptWindow(QWidget):
         self._base_style = self.styleSheet()
         self._geometry_ready = False
         self.transcript_entries = []
+        self.conversation_history = []
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -685,6 +687,7 @@ class PromptWindow(QWidget):
 
     def clear_workspace(self):
         self.transcript_entries.clear()
+        self.conversation_history.clear()
         self.clear_transcript_widgets()
         self.focus_prompt_editor()
 
@@ -756,6 +759,50 @@ class PromptWindow(QWidget):
         insert_at = max(0, self.transcript_layout.count() - 1)
         self.transcript_layout.insertWidget(insert_at, entry_widget)
         QTimer.singleShot(0, self.scroll_transcript_to_bottom)
+
+    def trim_conversation_history(self):
+        max_messages = PROMPT_CONVERSATION_EXCHANGE_LIMIT * 2
+
+        if max_messages <= 0:
+            self.conversation_history.clear()
+            return
+
+        if len(self.conversation_history) > max_messages:
+            self.conversation_history = self.conversation_history[-max_messages:]
+
+    def conversation_history_snapshot(self):
+        return [
+            {
+                "role": message["role"],
+                "content": message["content"],
+            }
+            for message in self.conversation_history
+            if (
+                isinstance(message, dict)
+                and message.get("role") in {"user", "assistant"}
+                and isinstance(message.get("content"), str)
+                and message.get("content").strip()
+            )
+        ]
+
+    def append_conversation_exchange(self, prompt, response):
+        prompt_text = "" if prompt is None else str(prompt).strip()
+        response_text = "" if response is None else str(response).strip()
+
+        if not prompt_text or not response_text:
+            return
+
+        self.conversation_history.extend([
+            {
+                "role": "user",
+                "content": prompt_text,
+            },
+            {
+                "role": "assistant",
+                "content": response_text,
+            },
+        ])
+        self.trim_conversation_history()
 
     def scroll_transcript_to_bottom(self):
         scrollbar = self.transcript_area.verticalScrollBar()
@@ -1862,6 +1909,10 @@ class Companion(QLabel):
             "prompt": user_prompt,
         }
 
+        conversation_history = self.prompt_window.conversation_history_snapshot()
+        if conversation_history:
+            interaction_data["conversation_history"] = conversation_history
+
         if attachments:
             interaction_data["attachments"] = attachments
 
@@ -1885,6 +1936,7 @@ class Companion(QLabel):
             phrase,
             attachments=display_attachments,
         )
+        self.prompt_window.append_conversation_exchange(user_prompt, phrase)
         self.prompt_window.clear_after_successful_submit()
         dispatch_speech(phrase)
 
