@@ -34,6 +34,28 @@ class LlamaCppProvider(LLMProvider):
         self.apply_profile_lifecycle_settings(self.profile)
         self.process = None
 
+    def _owns_running_process(self) -> bool:
+        return (
+            self.started_by_companion
+            and self.process is not None
+            and self.process.poll() is None
+        )
+
+    def _external_server_conflict_message(self) -> str:
+        return (
+            "llama.cpp is already running on "
+            f"{LLAMA_CPP_HOST}:{LLAMA_CPP_PORT}, but Rivet must own the "
+            "process to support profile routing and model switching. Stop "
+            "the existing server and restart Rivet."
+        )
+
+    def ensure_running(self) -> None:
+        if not self._owns_running_process() and self.health_check():
+            self.last_readiness_state = "external llama.cpp server is already ready"
+            raise RuntimeError(self._external_server_conflict_message())
+
+        super().ensure_running()
+
     def health_check(self) -> bool:
         try:
             with urlopen(LLAMA_CPP_HEALTH_URL, timeout=1.0) as response:

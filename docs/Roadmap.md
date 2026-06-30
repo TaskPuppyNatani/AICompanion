@@ -11,3 +11,9 @@ Future
 ☐ Auto-detect provider
 
 ☐ Drag-and-drop model import
+
+D:\AICompanion\llama\llama-server.exe ^
+  -m "D:\AICompanion\models\vision\qwen-vision.gguf" ^
+  --mmproj "D:\AICompanion\models\vision\qwen-vision-mmproj.gguf" ^
+  --host 127.0.0.1 ^
+  --port 8080
