@@ -108,6 +108,7 @@ PROMPT_IMAGE_FORMAT_MIME_TYPES = {
 }
 PROMPT_IMAGE_FILE_FILTER = "Images (*.png *.jpg *.jpeg *.webp)"
 PROMPT_CONVERSATION_EXCHANGE_LIMIT = 10
+VOICE_CAPTURE_SAMPLE_RATE = 16000
 
 
 def _format_qbytearray(value):
@@ -259,6 +260,8 @@ class ThoughtBubbleWidget(QWidget):
 
 class PromptWindow(QWidget):
     submitRequested = pyqtSignal(str, object, object)
+    dictationStartRequested = pyqtSignal()
+    dictationStopRequested = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -269,6 +272,7 @@ class PromptWindow(QWidget):
         self._geometry_ready = False
         self.transcript_entries = []
         self.conversation_history = []
+        self.dictation_state = "idle"
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -324,8 +328,8 @@ class PromptWindow(QWidget):
         action_layout = QHBoxLayout()
 
         self.microphone_button = QPushButton("Mic", self)
-        self.microphone_button.setEnabled(False)
-        self.microphone_button.setToolTip("Reserved for future dictation.")
+        self.microphone_button.setToolTip("Start dictation.")
+        self.microphone_button.clicked.connect(self.toggle_dictation)
         action_layout.addWidget(self.microphone_button)
 
         action_layout.addStretch()
@@ -451,6 +455,38 @@ class PromptWindow(QWidget):
 
     def focus_prompt_editor(self):
         self.prompt_editor.setFocus(Qt.FocusReason.ShortcutFocusReason)
+
+    def set_dictation_state(self, state):
+        self.dictation_state = state
+
+        if state == "recording":
+            self.microphone_button.setText("Stop")
+            self.microphone_button.setToolTip("Stop dictation and transcribe.")
+            self.microphone_button.setEnabled(True)
+        elif state == "transcribing":
+            self.microphone_button.setText("Transcribing...")
+            self.microphone_button.setToolTip("Transcribing dictation.")
+            self.microphone_button.setEnabled(False)
+        else:
+            self.dictation_state = "idle"
+            self.microphone_button.setText("Mic")
+            self.microphone_button.setToolTip("Start dictation.")
+            self.microphone_button.setEnabled(True)
+
+    def toggle_dictation(self):
+        if self.dictation_state == "recording":
+            self.dictationStopRequested.emit()
+        elif self.dictation_state == "idle":
+            self.dictationStartRequested.emit()
+
+    def insert_transcribed_text(self, text):
+        if not isinstance(text, str) or not text.strip():
+            return
+
+        cursor = self.prompt_editor.textCursor()
+        cursor.insertText(text.strip())
+        self.prompt_editor.setTextCursor(cursor)
+        self.focus_prompt_editor()
 
     def refresh_profile_title(self):
         title = "Rivet Prompt"
@@ -1247,7 +1283,10 @@ def clean_exit():
     is_shutting_down = True
 
     notification_label.hide()
-    label.hide()
+
+    if label is not None:
+        label.cancel_prompt_dictation()
+        label.hide()
 
     interaction_manager.shutdown()
 
@@ -1274,8 +1313,17 @@ class Companion(QLabel):
         self.avatar_source_pixmap = None
         self.avatar_size = None
         self.avatar_resized = False
+        self.prompt_dictation_stream = None
+        self.prompt_dictation_frames = []
+        self.prompt_dictation_sample_rate = VOICE_CAPTURE_SAMPLE_RATE
         self.prompt_window = PromptWindow()
         self.prompt_window.submitRequested.connect(self.submit_prompt_from_window)
+        self.prompt_window.dictationStartRequested.connect(
+            self.start_prompt_dictation
+        )
+        self.prompt_window.dictationStopRequested.connect(
+            self.stop_prompt_dictation
+        )
         self.prompt_shortcut = QShortcut(QKeySequence("Ctrl+Space"), self)
         self.prompt_shortcut.setContext(Qt.ShortcutContext.ApplicationShortcut)
         self.prompt_shortcut.activated.connect(self.open_prompt_dialog)
@@ -1792,15 +1840,127 @@ class Companion(QLabel):
         finally:
             self.transcribing_dialog = None
 
+    def show_transcribing_dialog(self, title):
+        self.clear_transcribing_dialog()
+
+        self.transcribing_dialog = QMessageBox(self)
+        self.transcribing_dialog.setWindowTitle(title)
+        self.transcribing_dialog.setText("Transcribing...")
+        self.transcribing_dialog.setStandardButtons(
+            QMessageBox.StandardButton.NoButton
+        )
+        self.transcribing_dialog.setModal(True)
+        self.transcribing_dialog.show()
+        QApplication.processEvents()
+
+    def start_audio_capture(self, sample_rate):
+        audio_frames = []
+        audio_callback = voice_capture.build_audio_callback(audio_frames)
+        stream = voice_capture.start_input_stream(sample_rate, audio_callback)
+        return stream, audio_frames
+
+    def transcribe_audio_frames(self, audio_frames, sample_rate, status_title=None):
+        temp_audio_path = None
+
+        try:
+            temp_audio_path = voice_capture.create_temp_wav_from_frames(
+                audio_frames,
+                sample_rate
+            )
+
+            if status_title:
+                self.show_transcribing_dialog(status_title)
+
+            return note_workflow.request_transcription(temp_audio_path)
+        finally:
+            if status_title:
+                self.clear_transcribing_dialog()
+
+            voice_capture.cleanup_temp_audio_file(temp_audio_path)
+
+    def show_prompt_dictation_error(self, message):
+        QMessageBox.warning(self.prompt_window, "Dictation unavailable", message)
+
+    def start_prompt_dictation(self):
+        if self.prompt_window.dictation_state != "idle":
+            return
+
+        if not voice_capture.audio_dependencies_available():
+            self.show_prompt_dictation_error(
+                "Dictation requires sounddevice, soundfile, and numpy."
+            )
+            self.prompt_window.set_dictation_state("idle")
+            return
+
+        self.prompt_dictation_frames = []
+
+        try:
+            (
+                self.prompt_dictation_stream,
+                self.prompt_dictation_frames,
+            ) = self.start_audio_capture(
+                self.prompt_dictation_sample_rate,
+            )
+        except Exception as e:
+            print(f"Prompt dictation recording error: {e}")
+            self.prompt_dictation_stream = None
+            self.prompt_dictation_frames = []
+            self.prompt_window.set_dictation_state("idle")
+            self.show_prompt_dictation_error("Could not start dictation recording.")
+            return
+
+        self.prompt_window.set_dictation_state("recording")
+
+    def stop_prompt_dictation(self):
+        if self.prompt_window.dictation_state != "recording":
+            return
+
+        stream = self.prompt_dictation_stream
+        audio_frames = self.prompt_dictation_frames
+        self.prompt_dictation_stream = None
+        self.prompt_dictation_frames = []
+
+        voice_capture.stop_and_close_stream(stream)
+
+        if not audio_frames:
+            self.prompt_window.set_dictation_state("idle")
+            self.show_prompt_dictation_error("No audio captured.")
+            return
+
+        self.prompt_window.set_dictation_state("transcribing")
+        QApplication.processEvents()
+
+        try:
+            transcript_text = self.transcribe_audio_frames(
+                audio_frames,
+                self.prompt_dictation_sample_rate
+            )
+        except Exception as e:
+            print(f"Prompt dictation transcription error: {e}")
+            self.show_prompt_dictation_error("Could not transcribe dictation right now.")
+            return
+        finally:
+            self.prompt_window.set_dictation_state("idle")
+
+        if not transcript_text:
+            self.show_prompt_dictation_error("No speech detected.")
+            return
+
+        self.prompt_window.insert_transcribed_text(transcript_text)
+
+    def cancel_prompt_dictation(self):
+        voice_capture.stop_and_close_stream(self.prompt_dictation_stream)
+        self.prompt_dictation_stream = None
+        self.prompt_dictation_frames = []
+        self.prompt_window.set_dictation_state("idle")
+
     def voice_note_dialog(self):
         if not voice_capture.audio_dependencies_available():
             notify("Voice Note requires sounddevice, soundfile, and numpy.")
             return
 
-        sample_rate = 16000
-        audio_frames = []
+        sample_rate = VOICE_CAPTURE_SAMPLE_RATE
         recording_state = {"stopped": False}
-        audio_callback = voice_capture.build_audio_callback(audio_frames)
 
         record_dialog = QDialog(self)
         record_dialog.setWindowTitle("Voice Note")
@@ -1824,9 +1984,10 @@ class Companion(QLabel):
         cancel_button.clicked.connect(record_dialog.reject)
 
         stream = None
+        audio_frames = []
 
         try:
-            stream = voice_capture.start_input_stream(sample_rate, audio_callback)
+            stream, audio_frames = self.start_audio_capture(sample_rate)
             record_dialog.exec()
         except Exception as e:
             print(f"Voice recording error: {e}")
@@ -1842,37 +2003,18 @@ class Companion(QLabel):
             notify("No audio captured.")
             return
 
-        temp_audio_path = None
         transcript_text = ""
 
         try:
-            temp_audio_path = voice_capture.create_temp_wav_from_frames(
+            transcript_text = self.transcribe_audio_frames(
                 audio_frames,
-                sample_rate
+                sample_rate,
+                status_title="Voice Note"
             )
-
-            # Ensure no stale status dialog remains before showing a new one.
-            self.clear_transcribing_dialog()
-
-            self.transcribing_dialog = QMessageBox(self)
-            self.transcribing_dialog.setWindowTitle("Voice Note")
-            self.transcribing_dialog.setText("Transcribing...")
-            self.transcribing_dialog.setStandardButtons(
-                QMessageBox.StandardButton.NoButton
-            )
-            self.transcribing_dialog.setModal(True)
-            self.transcribing_dialog.show()
-            QApplication.processEvents()
-
-            transcript_text = note_workflow.request_transcription(temp_audio_path)
-
         except Exception as e:
             print(f"Voice transcription error: {e}")
             notify("Could not transcribe voice note right now.")
             return
-        finally:
-            self.clear_transcribing_dialog()
-            voice_capture.cleanup_temp_audio_file(temp_audio_path)
 
         if not transcript_text:
             notify("No speech detected.")
